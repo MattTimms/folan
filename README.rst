@@ -1,6 +1,11 @@
 FoLAN
 =====
 
+.. image:: https://badge.fury.io/py/folan.svg
+    :target: https://badge.fury.io/py/folan
+.. image:: https://secure.travis-ci.org/MattTimms/folan.png
+    :target: http://travis-ci.org/MattTimms/folan.png
+
 Files over LAN is a pretty simple script used for sending Files over LAN.
 
 ``python setup.py install``

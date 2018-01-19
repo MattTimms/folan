@@ -9,7 +9,7 @@ import sys
 
 if sys.argv[-1] == "publish":
     os.system("python setup.py sdist")
-    os.system("twine upload dist/*")
+    os.system("twine upload dist/folan-{}.tar.gz".format(__version__))
     sys.exit()
 
 with open('README.rst', 'r', encoding='utf-8') as f:
