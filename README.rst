@@ -3,19 +3,16 @@ FoLAN
 
 .. image:: https://badge.fury.io/py/folan.svg
     :target: https://badge.fury.io/py/folan
-.. image:: https://secure.travis-ci.org/MattTimms/folan.png
-    :target: http://travis-ci.org/MattTimms/folan.png
+.. image:: https://travis-ci.org/MattTimms/folan.svg?branch=master
+    :target: https://travis-ci.org/MattTimms/folan
 
 Files over LAN is a pretty simple script used for sending Files over LAN.
 
-``python setup.py install``
 
-Requirements
-------------
+Install
+-------
+``pip install folan``
 
-``pip install -r requirements.txt``
-
--  docopt (https://github.com/docopt/docopt)
 
 Usage
 -----
@@ -38,3 +35,10 @@ Usage
       -s, --save_path DIR_PATH  Path to saving directory [default: serv_dest/].
       --stdout                  Use stdout.
 
+
+Requirements
+------------
+
+``pip install -r requirements.txt``
+
+-  docopt (https://github.com/docopt/docopt)
