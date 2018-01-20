@@ -8,11 +8,9 @@ FoLAN
 
 Files over LAN is a pretty simple script used for sending Files over LAN.
 
+Have a host listen on particular local ip:port for another host whom is sending to those same address details.
 
-Install
--------
 ``pip install folan``
-
 
 Usage
 -----
@@ -30,10 +28,15 @@ Usage
       folan.py send dir <ip:port> <dir_path> [options]
       folan.py (-h | --help)
 
+    Example:
+      folan.py listen 196.168.0.13:40000 -s . --limit=10
+      folan.py send dir 10.100.192.15:5555 imgs/ --stayalive
+
     Options:
       -h --help                 Shows this screen.
-      -s, --save_path DIR_PATH  Path to saving directory [default: serv_dest/].
-      --stdout                  Use stdout.
+      --stayalive               Continues to poll directory and send new files
+      --limit LEN_FILES         Limits number of files to receive before closing
+      -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 
 
 Requirements

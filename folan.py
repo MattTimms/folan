@@ -9,10 +9,15 @@ Usage:
   folan.py send dir <ip:port> <dir_path> [options]
   folan.py (-h | --help)
 
+Example:
+  folan.py listen 196.168.0.13:40000 -s . --limit=10
+  folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
+
 Options:
   -h --help                 Shows this screen.
-  -s, --save_path DIR_PATH  Path to saving directory [default: serv_dest/].
-  --stdout                  Use stdout.
+  --stayalive               Continues to poll directory and send new files
+  --limit LEN_FILES         Limits number of files to receive before closing
+  -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 """
 
 from __future__ import print_function
@@ -21,26 +26,28 @@ import struct
 import os.path
 
 __all__ = ['folan']
-__version__ = '1.0.0a2'
+__version__ = '1.1.0'
 
 
 class Client(object):
-    """ """
     def __init__(self, ip, port, timeout=3, debug=False):
         self.dest = (ip, port)
         self.timeout = timeout
         self.debug = debug
         self.sock = None
+        self.buffer_size = 4096
+        self.len_files_sent = 0
 
     def connect(self):
+        """ Returns 1 if successfully connects with target host else 0 after timeout """
         self._print_dbg("\n# Trying to Connect...", True)
         self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
         self.sock.settimeout(self.timeout)
         try:
             self.sock.connect(self.dest)
         except socket.error as error:
-            self._print_dbg("Could not connect: {}\nEnsure end host is running and ip:port are correct".format(error))
+            self._print_dbg("Could not connect: {}".format(error))
             return 0
         self._print_dbg("Connection made")
         return 1
@@ -51,26 +58,25 @@ class Client(object):
     def send_file(self, filepath):
         self._print_dbg("\nSending file: {}".format(filepath))
         _, filename = os.path.split(filepath)
-
-        namesize = struct.pack('I', len(filename))
-        self.sock.send(namesize)
+        filename_size = struct.pack('I', len(filename))
+        self.sock.send(filename_size)  # Length of next expected pkt sent
         self.sock.send(filename.encode())
 
         filesize = os.path.getsize(filepath)
-        self._print_dbg("Filesize is {:.1f} KB...".format(float(filesize)/1024), True)
-
-        sizepack = struct.pack('I', filesize)  # Filesize is packed and sent to server
+        self._print_dbg("\tFilesize is {:.1f} KB...".format(float(filesize)/1024), True)
+        sizepack = struct.pack('I', filesize)
         self.sock.send(sizepack)
 
         with open(filepath, 'rb') as f:
-            buff = f.read(4096)
+            buff = f.read(self.buffer_size)
             while buff:
                 self.sock.send(buff)
-                buff = f.read(4096)
+                buff = f.read(self.buffer_size)
 
         verify = self.sock.recv(13).decode()
         self._print_dbg(verify)
-        self._print_dbg("Done Sending")
+        self.len_files_sent += 1
+        self._print_dbg("\tDone Sending")
 
     def _print_dbg(self, string, newline=False):
         if self.debug:
@@ -81,15 +87,17 @@ class Client(object):
 
 
 class Server(object):
-    """ """
     def __init__(self, ip, port, timeout=3, debug=False):
         self.dest = (ip, port)
         self.timeout = timeout
         self.debug = debug
         self.sock = None
         self.conn = None
+        self.buffer_size = 4096
+        self.len_files_recv = 0
 
     def connect(self):
+        """ Returns 1 if successfully connects with target host else 0 after timeout """
         self._print_dbg("\n# Trying to Connect...", True)
         try:
             self.sock = socket.socket()
@@ -104,7 +112,6 @@ class Server(object):
             self.conn, addr = self.sock.accept()
         except socket.timeout:
             return 0
-        self.conn.settimeout(self.timeout)
         self._print_dbg("Got connection from {}".format(addr))
         return 1
 
@@ -113,27 +120,29 @@ class Server(object):
         self.sock.close()
 
     def recv_file(self, save_directory=''):
-        namesize = self.conn.recv(struct.calcsize("!I"))
-        namesize = struct.unpack('I', namesize)[0]
-        filename = self.conn.recv(namesize).decode()
+        """ Receives file and writes into save_directory """
+        filename_size = self.conn.recv(struct.calcsize("!I"))
+        filename_size = struct.unpack('I', filename_size)[0]
+        filename = self.conn.recv(filename_size).decode()
         self._print_dbg("\nReceiving file: {}".format(filename))
 
         sizepack = self.conn.recv(struct.calcsize('!I'))
         filesize = struct.unpack('I', sizepack)[0]
-        self._print_dbg("Filesize is {:.1f} KB...".format(float(filesize)/1024), True)
+        self._print_dbg("\tFilesize is {:.1f} KB...".format(float(filesize)/1024), True)
 
         filepath = ''.join([save_directory, filename])
         with open(filepath, 'wb') as f:
             while True:
-                data = self.conn.recv(4096)
-                if len(data) == 0:  # Phantom error
+                data = self.conn.recv(self.buffer_size)
+                if len(data) == 0:
                     f.close()
-                    raise ValueError("Socket closure")
+                    raise Exception("Socket closure")
                 f.write(data)
                 if f.tell() == filesize:
                     break
             self.conn.send("File received".encode())
             f.close()
+        self.len_files_recv += 1
         self._print_dbg("File received")
 
     def _print_dbg(self, string, newline=False):
@@ -149,13 +158,20 @@ def main():
     args = docopt(__doc__)
 
     ip, port = args['<ip:port>'].split(':')
+    if ip == '\'\'':  # docopt's response to '' input
+        ip = ''  # default interface
     port = int(port)
 
     if args['listen']:
-        server = Server(ip, port, debug=args['--stdout'])
-        save_directory = args['--save_path']  # TODO allow for current directory
+        server = Server(ip, port, debug=True)
+
+        save_directory = args['--save_path']
         if save_directory[-1] != '/':
             save_directory += '/'
+        if args['--limit'] is not None:
+            file_limit = int(args['--limit'])
+        else:
+            file_limit = 0
 
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
@@ -164,6 +180,9 @@ def main():
             pass
 
         while True:
+            if server.len_files_recv == file_limit and file_limit > 0:
+                break
+
             try:
                 server.recv_file(save_directory)
             except KeyboardInterrupt:
@@ -173,24 +192,27 @@ def main():
                 while not server.connect():
                     pass
 
+
     elif args['send']:
-        client = Client(ip, port, debug=args['--stdout'])
+        client = Client(ip, port, debug=True)
         while not client.connect():
+            print('Ensure end host is running and target ip:port are correct.')
             pass
 
         if args['files']:
-            i = 0
             file_paths = args['<file_path>']
-            file_path = file_paths[i]
+            file_path = file_paths[client.len_files_sent]
             while True:
                 if not os.path.exists(file_path):
                     print("Path to file is incorrect: ", file_path)
-                    continue
+                    file_paths.pop(client.len_files_sent)
+
+                if client.len_files_sent == len(file_paths):
+                    break
+                file_path = file_paths[client.len_files_sent]
+
                 try:
                     client.send_file(file_path)
-                    i += 1
-                    if i > len(file_paths):
-                        break
                 except KeyboardInterrupt:
                     print('KeyboardInterrupt')
                     break
@@ -202,6 +224,11 @@ def main():
             dir_path = args['<dir_path>']
             if dir_path[-1] != '/':
                 dir_path += '/'
+            if args['--limit'] is not None:
+                file_limit = int(args['--limit'])
+            else:
+                file_limit = 0
+            stayalive = args['--stayalive']
 
             file_history = []
             while True:
@@ -210,23 +237,32 @@ def main():
                 file_history.extend(new_files)
 
                 if new_files:
-                    i = 0
-                    file_path = new_files[i]
+                    len_newfiles_sent = 0
+                    file_path = new_files[len_newfiles_sent]
                     while True:
                         if not os.path.exists(file_path):
                             print("Path to file is incorrect: ", file_path)
-                            continue
+                            new_files.pop(client.len_files_sent)
+
+                        if len_newfiles_sent == len(new_files):
+                            break
+                        elif client.len_files_sent >= file_limit and file_limit > 0:
+                            break
+                        file_path = new_files[len_newfiles_sent]
+
                         try:
                             client.send_file(file_path)
-                            i += 1
-                            if i > len(new_files):
-                                break
+                            len_newfiles_sent += 1
                         except KeyboardInterrupt:
                             print('KeyboardInterrupt')
                             break
                         except:  # Any error will trigger a reconnect, be aware for debugging
                             while not client.connect():
                                 pass
+                if client.len_files_sent >= file_limit and file_limit > 0:
+                    break
+                elif not stayalive:
+                    break
 
         client.close()
     print("fin.")

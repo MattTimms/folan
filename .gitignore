@@ -1,7 +1,7 @@
 # Common package-specific ignores
 .idea/
 cli_data/
-serv_data/
+folan_dest/
 *.jpg
 *.png
 
