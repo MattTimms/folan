@@ -8,11 +8,9 @@ FoLAN
 
 Files over LAN is a pretty simple script used for sending Files over LAN.
 
+Have a host listen on particular local ip:port for another host whom is sending to those same address details.
 
-Install
--------
 ``pip install folan``
-
 
 Usage
 -----
