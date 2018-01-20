@@ -3,7 +3,6 @@
 
 from folan import __version__
 from setuptools import setup
-import codecs
 import os
 import sys
 
@@ -14,9 +13,6 @@ if sys.argv[-1] == "publish":
     os.system("python setup.py sdist bdist_wheel --universal")
     os.system("twine upload dist/*")
     sys.exit()
-
-with codecs.open('README.rst', encoding='utf-8') as f:
-    long_description = '\n' + f.read()
 
 REQUIRED = [
     'docopt==0.6.2'
@@ -50,5 +46,5 @@ setup(
         ]
     },
     keywords=['file sharing', 'tcp', 'lan'],
-    long_description=long_description
+    long_description=open('README.rst').read()
 )

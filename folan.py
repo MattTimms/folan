@@ -136,7 +136,7 @@ class Server(object):
                 data = self.conn.recv(self.buffer_size)
                 if len(data) == 0:
                     f.close()
-                    raise Exception("Socket closure")
+                    raise socket.error("Socket closure")
                 f.write(data)
                 if f.tell() == filesize:
                     break
@@ -188,10 +188,9 @@ def main():
             except KeyboardInterrupt:
                 print('KeyboardInterrupt')
                 break
-            except:
-                while not server.connect():
+            except socket.error:
+                while not server.connect():  # reconnect
                     pass
-
 
     elif args['send']:
         client = Client(ip, port, debug=True)
@@ -216,7 +215,7 @@ def main():
                 except KeyboardInterrupt:
                     print('KeyboardInterrupt')
                     break
-                except:  # Any error will trigger a reconnect, be aware for debugging
+                except socket.error:  # Any error will trigger a reconnect, be aware for debugging
                     while not client.connect():
                         pass
 
@@ -246,7 +245,7 @@ def main():
 
                         if len_newfiles_sent == len(new_files):
                             break
-                        elif client.len_files_sent >= file_limit and file_limit > 0:
+                        elif client.len_files_sent >= file_limit and file_limit:
                             break
                         file_path = new_files[len_newfiles_sent]
 
@@ -256,10 +255,10 @@ def main():
                         except KeyboardInterrupt:
                             print('KeyboardInterrupt')
                             break
-                        except:  # Any error will trigger a reconnect, be aware for debugging
+                        except socket.error:
                             while not client.connect():
                                 pass
-                if client.len_files_sent >= file_limit and file_limit > 0:
+                if client.len_files_sent >= file_limit and file_limit:
                     break
                 elif not stayalive:
                     break
