@@ -10,10 +10,12 @@ Usage:
   folan.py (-h | --help)
 
 Example:
-  folan.py listen 196.168.0.13:40000 -s .
+  folan.py listen 196.168.0.13:40000 -s . --limit=10
+  folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
 
 Options:
   -h --help                 Shows this screen.
+  --stayalive               Continues to poll directory and send new files
   --limit LEN_FILES         Limits number of files to receive before closing
   -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 """
@@ -74,7 +76,7 @@ class Client(object):
         verify = self.sock.recv(13).decode()
         self._print_dbg(verify)
         self.len_files_sent += 1
-        self._print_dbg("Done Sending")
+        self._print_dbg("\tDone Sending")
 
     def _print_dbg(self, string, newline=False):
         if self.debug:
@@ -163,12 +165,13 @@ def main():
     if args['listen']:
         server = Server(ip, port, debug=True)
 
-        file_limit = args['--limit']
-        if args['--limit'] is not None:
-            file_limit = int(file_limit)
         save_directory = args['--save_path']
         if save_directory[-1] != '/':
             save_directory += '/'
+        if args['--limit'] is not None:
+            file_limit = int(args['--limit'])
+        else:
+            file_limit = 0
 
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
@@ -177,7 +180,7 @@ def main():
             pass
 
         while True:
-            if server.len_files_recv == file_limit and file_limit:
+            if server.len_files_recv == file_limit and file_limit > 0:
                 break
 
             try:
@@ -221,6 +224,11 @@ def main():
             dir_path = args['<dir_path>']
             if dir_path[-1] != '/':
                 dir_path += '/'
+            if args['--limit'] is not None:
+                file_limit = int(args['--limit'])
+            else:
+                file_limit = 0
+            stayalive = args['--stayalive']
 
             file_history = []
             while True:
@@ -229,24 +237,33 @@ def main():
                 file_history.extend(new_files)
 
                 if new_files:
-                    file_path = new_files[client.len_files_sent]
+                    len_newfiles_sent = 0
+                    file_path = new_files[len_newfiles_sent]
                     while True:
                         if not os.path.exists(file_path):
                             print("Path to file is incorrect: ", file_path)
                             new_files.pop(client.len_files_sent)
 
-                        if client.len_files_sent == len(new_files):
+                        if len_newfiles_sent == len(new_files):
                             break
-                        file_path = new_files[client.len_files_sent]
+                        elif client.len_files_sent >= file_limit and file_limit > 0:
+                            break
+                        file_path = new_files[len_newfiles_sent]
 
                         try:
                             client.send_file(file_path)
+                            len_newfiles_sent += 1
                         except KeyboardInterrupt:
                             print('KeyboardInterrupt')
                             break
                         except:  # Any error will trigger a reconnect, be aware for debugging
                             while not client.connect():
                                 pass
+                if client.len_files_sent >= file_limit and file_limit > 0:
+                    break
+                elif not stayalive:
+                    break
+
         client.close()
     print("fin.")
 
