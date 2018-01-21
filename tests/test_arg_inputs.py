@@ -107,7 +107,7 @@ def test_stayalive():
     while server_thread.is_alive():
         pass
 
-    assert filecmp.cmp('send/after.txt', 'recv/after.txt', shallow=False)  # sender stay alive for new file to be sent
+    assert filecmp.cmp('send/after.txt', 'recv/after.txt', shallow=True)  # sender stay alive for new file to be sent
     shutil.rmtree('send/')
     shutil.rmtree('recv/')
 
