@@ -26,7 +26,7 @@ import struct
 import os.path
 
 __all__ = ['folan']
-__version__ = '1.1.0'
+__version__ = '1.1.1'
 
 
 class Client(object):
@@ -153,10 +153,7 @@ class Server(object):
                 print(string)
 
 
-def main():
-    from docopt import docopt
-    args = docopt(__doc__)
-
+def main(args):
     ip, port = args['<ip:port>'].split(':')
     if ip == '\'\'':  # docopt's response to '' input
         ip = ''  # default interface
@@ -268,4 +265,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from docopt import docopt
+    args = docopt(__doc__)
+    main(args)

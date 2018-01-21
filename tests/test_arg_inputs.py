@@ -6,13 +6,21 @@ import time
 import threading
 import shutil
 
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+import folan
+
+arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/', '--stayalive': False,
+            '--limit': None, 'send': False, 'files': False, '<file_path>': [], 'dir': False, '<dir_path>': None,
+            '--help': False}
 
 def serv(args):
-    os.system(''.join(["python ../folan.py listen ", args]))
+    args['listen'] = True
+    folan.main(args)
 
 
 def cli(args):
-    os.system(''.join(["python ../folan.py send ", args]))
+    args['send'] = True
+    folan.main(args)
 
 
 def write_dummy_file(filename='temp.txt', filesize=1048576):
@@ -22,24 +30,6 @@ def write_dummy_file(filename='temp.txt', filesize=1048576):
         f.write(b"\0" * size)
 
 
-def test_simple_inputs():
-    write_dummy_file()
-    serv_args = '127.0.0.1:40002 --limit 1'
-    cli_args = 'files 127.0.0.1:40002 temp.txt'
-    server_thread = threading.Thread(target=serv, args=(serv_args,))
-    client_thread = threading.Thread(target=cli, args=(cli_args,))
-    server_thread.start()
-    client_thread.start()
-    while client_thread.is_alive():
-        pass
-    time.sleep(0.5)
-    assert not server_thread.is_alive()  # server closed after file limit
-
-    assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)  # file sent successfully
-    os.remove('temp.txt')
-    shutil.rmtree('folan_dest/')
-
-
 def test_local_dir_save():
     if not os.path.exists('folan_dest/'):
         os.makedirs('folan_dest/')
@@ -47,8 +37,13 @@ def test_local_dir_save():
     if os.path.exists('temp.txt'):
         os.remove('temp.txt')
 
-    serv_args = '127.0.0.1:40002 -s . --limit 1'
-    cli_args = 'files 127.0.0.1:40002 folan_dest/temp.txt'
+    serv_args = arg_dict.copy()
+    serv_args['--save_path'] = '.'
+    serv_args['--limit'] = 1
+    cli_args = arg_dict.copy()
+    cli_args['files'] = True
+    cli_args['<file_path>'] = ['folan_dest/temp.txt']
+
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
     server_thread.start()
@@ -69,8 +64,13 @@ def test_directory_send():
     for i in range(10):
         write_dummy_file('send/{}.txt'.format(str(i)))  #, (1024*1024))
 
-    serv_args = '127.0.0.1:40002 -s recv/ --limit 10'
-    cli_args = 'dir 127.0.0.1:40002 send/'
+    serv_args = arg_dict.copy()
+    serv_args['--save_path'] = 'recv'
+    serv_args['--limit'] = 10
+    cli_args = arg_dict.copy()
+    cli_args['dir'] = True
+    cli_args['<dir_path>'] = 'send'
+
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
     server_thread.start()
@@ -89,8 +89,15 @@ def test_stayalive():
         os.makedirs('send/')
     write_dummy_file('send/before.txt')
 
-    serv_args = '127.0.0.1:40002 -s recv/ --limit=2'
-    cli_args = 'dir 127.0.0.1:40002 send/ --stayalive --limit=2'
+    serv_args = arg_dict.copy()
+    serv_args['--save_path'] = 'recv/'
+    serv_args['--limit'] = 2
+    cli_args = arg_dict.copy()
+    cli_args['dir'] = True
+    cli_args['<dir_path>'] = 'send/'
+    cli_args['--stayalive'] = True
+    cli_args['--limit'] = 2
+
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
     server_thread.start()
@@ -106,8 +113,6 @@ def test_stayalive():
 
 
 if __name__ == '__main__':
-    print("\ntest_simple_inputs()")
-    test_simple_inputs()
     print("\n\ntest_local_dir_save()")
     test_local_dir_save()
     print("\n\ntest_directory_send()")

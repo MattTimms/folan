@@ -2,44 +2,39 @@ from __future__ import print_function
 import os
 import sys
 import filecmp
+import shutil
 import time
 import threading
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import folan
 
+arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/', '--stayalive': False,
+            '--limit': None, 'send': False, 'files': False, '<file_path>': [], 'dir': False, '<dir_path>': None,
+            '--help': False}
+
+
+def write_dummy_file(filename='temp.txt', filesize=1048576):
+    """ Creates 1MB temporary file """
+    with open(filename, 'wb') as f:
+        size = filesize
+        f.write(b"\0" * size)
+
 
 def serv():
-    server = folan.Server('127.0.0.1', 40002, debug=True)
-    while not server.connect():
-        pass
-
-    while True:
-        try:
-            server.recv_file('_')
-            break
-        except:
-            while not server.connect():
-                pass
+    serv_args = arg_dict.copy()
+    serv_args['listen'] = True
+    serv_args['--limit'] = 1
+    folan.main(serv_args)
 
 
 def cli():
-    client = folan.Client('127.0.0.1', 40002, debug=True)
-    while not client.connect():
-        pass
-
-    file_path = 'temp.txt'
-    with open(file_path, 'wb') as f:  # Create 1MB temp file
-        size = 1048576
-        f.write(b"\0" * size)
-
-    while True:
-        try:
-            client.send_file(file_path)
-            break
-        except:
-            while not client.connect():
-                pass
+    write_dummy_file()
+    cli_args = arg_dict.copy()
+    cli_args['send'] = True
+    cli_args['files'] = True
+    cli_args['<file_path>'] = ['temp.txt']
+    folan.main(cli_args)
 
 
 def test_throwing_file_locally():
@@ -51,9 +46,9 @@ def test_throwing_file_locally():
     while server_thread.is_alive():
         pass
 
-    assert filecmp.cmp('temp.txt', '_temp.txt', shallow=False)
+    assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)
     os.remove('temp.txt')
-    os.remove('_temp.txt')
+    shutil.rmtree('folan_dest/')
 
 
 if __name__ == "__main__":
