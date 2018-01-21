@@ -104,7 +104,7 @@ def test_stayalive():
     client_thread.start()
     time.sleep(2)  # enough time for one file to send
     write_dummy_file('send/after.txt')
-    while client_thread.is_alive():
+    while server_thread.is_alive():
         pass
 
     assert filecmp.cmp('send/after.txt', 'recv/after.txt', shallow=False)  # sender stay alive for new file to be sent

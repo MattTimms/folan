@@ -132,16 +132,15 @@ class Server(object):
 
         filepath = ''.join([save_directory, filename])
         with open(filepath, 'wb') as f:
-            while True:
-                data = self.conn.recv(self.buffer_size)
-                if len(data) == 0:
-                    f.close()
-                    raise socket.error("Socket closure")
-                f.write(data)
-                if f.tell() == filesize:
-                    break
-            self.conn.send("File received".encode())
-            f.close()
+            if filesize:
+                while True:
+                    data = self.conn.recv(self.buffer_size)
+                    if len(data) == 0:
+                        raise socket.error("Socket closure")
+                    f.write(data)
+                    if f.tell() == filesize:
+                        break
+        self.conn.send("File received".encode())
         self.len_files_recv += 1
         self._print_dbg("File received")
 
