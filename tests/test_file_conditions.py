@@ -51,6 +51,3 @@ def test_empty_file_send():
     assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)  # file saved in local directory
     os.remove('temp.txt')
     shutil.rmtree('folan_dest/')
-
-if __name__ == '__main__':
-    test_empty_file_send()

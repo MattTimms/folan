@@ -62,7 +62,7 @@ def test_directory_send():
     if not os.path.exists('recv/'):
         os.makedirs('recv/')
     for i in range(10):
-        write_dummy_file('send/{}.txt'.format(str(i)))  #, (1024*1024))
+        write_dummy_file('send/{}.txt'.format(str(i)))
 
     serv_args = arg_dict.copy()
     serv_args['--save_path'] = 'recv'
@@ -91,7 +91,7 @@ def test_stayalive():
 
     serv_args = arg_dict.copy()
     serv_args['--save_path'] = 'recv/'
-    serv_args['--limit'] = 2
+    serv_args['--limit'] = 1
     cli_args = arg_dict.copy()
     cli_args['dir'] = True
     cli_args['<dir_path>'] = 'send/'
@@ -102,21 +102,14 @@ def test_stayalive():
     client_thread = threading.Thread(target=cli, args=(cli_args,))
     server_thread.start()
     client_thread.start()
-    time.sleep(2)  # enough time for one file to send
-    write_dummy_file('send/after.txt')
     while server_thread.is_alive():
+        pass
+    server_thread = threading.Thread(target=serv, args=(serv_args,))
+    server_thread.start()
+    write_dummy_file('send/after.txt')
+    while client_thread.is_alive():
         pass
 
     assert filecmp.cmp('send/after.txt', 'recv/after.txt', shallow=True)  # sender stay alive for new file to be sent
     shutil.rmtree('send/')
     shutil.rmtree('recv/')
-
-
-if __name__ == '__main__':
-    print("\n\ntest_local_dir_save()")
-    test_local_dir_save()
-    print("\n\ntest_directory_send()")
-    test_directory_send()
-    print("\n\ntest_stayalive()")
-    test_stayalive()
-    print('\n\nfin.')

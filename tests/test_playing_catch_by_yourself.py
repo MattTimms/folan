@@ -49,8 +49,3 @@ def test_throwing_file_locally():
     assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)
     os.remove('temp.txt')
     shutil.rmtree('folan_dest/')
-
-
-if __name__ == "__main__":
-    test_throwing_file_locally()
-    print('\nfin.')
