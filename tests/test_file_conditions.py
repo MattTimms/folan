@@ -2,9 +2,9 @@ from __future__ import print_function
 import os
 import sys
 import filecmp
-import shutil
 import time
 import threading
+import shutil
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import folan
@@ -12,6 +12,15 @@ import folan
 arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/', '--stayalive': False,
             '--limit': None, 'send': False, 'files': False, '<file_path>': [], 'dir': False, '<dir_path>': None,
             '--help': False}
+
+def serv(args):
+    args['listen'] = True
+    folan.main(args)
+
+
+def cli(args):
+    args['send'] = True
+    folan.main(args)
 
 
 def write_dummy_file(filename='temp.txt', filesize=1048576):
@@ -21,31 +30,24 @@ def write_dummy_file(filename='temp.txt', filesize=1048576):
         f.write(b"\0" * size)
 
 
-def serv():
+def test_empty_file_send():
+    write_dummy_file(filesize=0)
+
     serv_args = arg_dict.copy()
     serv_args['listen'] = True
     serv_args['--limit'] = 1
-    folan.main(serv_args)
-
-
-def cli():
-    write_dummy_file()
     cli_args = arg_dict.copy()
     cli_args['send'] = True
     cli_args['files'] = True
     cli_args['<file_path>'] = ['temp.txt']
-    folan.main(cli_args)
 
-
-def test_throwing_file_locally():
-    server_thread = threading.Thread(target=serv)
-    client_thread = threading.Thread(target=cli)
+    server_thread = threading.Thread(target=serv, args=(serv_args,))
+    client_thread = threading.Thread(target=cli, args=(cli_args,))
     server_thread.start()
-    time.sleep(1)
     client_thread.start()
     while server_thread.is_alive():
         pass
 
-    assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)
+    assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)  # file saved in local directory
     os.remove('temp.txt')
     shutil.rmtree('folan_dest/')

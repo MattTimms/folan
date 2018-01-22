@@ -23,10 +23,10 @@ Options:
 from __future__ import print_function
 import socket
 import struct
-import os.path
+import os
 
 __all__ = ['folan']
-__version__ = '1.1.0'
+__version__ = '1.1.1'
 
 
 class Client(object):
@@ -36,7 +36,7 @@ class Client(object):
         self.debug = debug
         self.sock = None
         self.buffer_size = 4096
-        self.len_files_sent = 0
+        self.files_sent_len = 0
 
     def connect(self):
         """ Returns 1 if successfully connects with target host else 0 after timeout """
@@ -75,7 +75,7 @@ class Client(object):
 
         verify = self.sock.recv(13).decode()
         self._print_dbg(verify)
-        self.len_files_sent += 1
+        self.files_sent_len += 1
         self._print_dbg("\tDone Sending")
 
     def _print_dbg(self, string, newline=False):
@@ -94,7 +94,7 @@ class Server(object):
         self.sock = None
         self.conn = None
         self.buffer_size = 4096
-        self.len_files_recv = 0
+        self.files_recv_len = 0
 
     def connect(self):
         """ Returns 1 if successfully connects with target host else 0 after timeout """
@@ -132,17 +132,16 @@ class Server(object):
 
         filepath = ''.join([save_directory, filename])
         with open(filepath, 'wb') as f:
-            while True:
-                data = self.conn.recv(self.buffer_size)
-                if len(data) == 0:
-                    f.close()
-                    raise Exception("Socket closure")
-                f.write(data)
-                if f.tell() == filesize:
-                    break
-            self.conn.send("File received".encode())
-            f.close()
-        self.len_files_recv += 1
+            if filesize:
+                while True:
+                    data = self.conn.recv(self.buffer_size)
+                    if len(data) == 0:
+                        raise socket.error("Socket closure")
+                    f.write(data)
+                    if f.tell() == filesize:
+                        break
+        self.conn.send("File received".encode())
+        self.files_recv_len += 1
         self._print_dbg("File received")
 
     def _print_dbg(self, string, newline=False):
@@ -153,10 +152,10 @@ class Server(object):
                 print(string)
 
 
-def main():
-    from docopt import docopt
-    args = docopt(__doc__)
-
+def main(args):
+    if not isinstance(args, dict):
+        raise TypeError("args expected as dictionary")
+    
     ip, port = args['<ip:port>'].split(':')
     if ip == '\'\'':  # docopt's response to '' input
         ip = ''  # default interface
@@ -180,7 +179,7 @@ def main():
             pass
 
         while True:
-            if server.len_files_recv == file_limit and file_limit > 0:
+            if server.files_recv_len == file_limit and file_limit > 0:
                 break
 
             try:
@@ -188,10 +187,9 @@ def main():
             except KeyboardInterrupt:
                 print('KeyboardInterrupt')
                 break
-            except:
-                while not server.connect():
+            except socket.error:
+                while not server.connect():  # reconnect
                     pass
-
 
     elif args['send']:
         client = Client(ip, port, debug=True)
@@ -201,22 +199,22 @@ def main():
 
         if args['files']:
             file_paths = args['<file_path>']
-            file_path = file_paths[client.len_files_sent]
+            file_path = file_paths[client.files_sent_len]
             while True:
                 if not os.path.exists(file_path):
                     print("Path to file is incorrect: ", file_path)
-                    file_paths.pop(client.len_files_sent)
+                    file_paths.pop(client.files_sent_len)
 
-                if client.len_files_sent == len(file_paths):
+                if client.files_sent_len == len(file_paths):
                     break
-                file_path = file_paths[client.len_files_sent]
+                file_path = file_paths[client.files_sent_len]
 
                 try:
                     client.send_file(file_path)
                 except KeyboardInterrupt:
                     print('KeyboardInterrupt')
                     break
-                except:  # Any error will trigger a reconnect, be aware for debugging
+                except socket.error:  # Any error will trigger a reconnect, be aware for debugging
                     while not client.connect():
                         pass
 
@@ -242,11 +240,11 @@ def main():
                     while True:
                         if not os.path.exists(file_path):
                             print("Path to file is incorrect: ", file_path)
-                            new_files.pop(client.len_files_sent)
+                            new_files.pop(client.files_sent_len)
 
                         if len_newfiles_sent == len(new_files):
                             break
-                        elif client.len_files_sent >= file_limit and file_limit > 0:
+                        elif client.files_sent_len >= file_limit and file_limit:
                             break
                         file_path = new_files[len_newfiles_sent]
 
@@ -256,10 +254,10 @@ def main():
                         except KeyboardInterrupt:
                             print('KeyboardInterrupt')
                             break
-                        except:  # Any error will trigger a reconnect, be aware for debugging
+                        except socket.error:
                             while not client.connect():
                                 pass
-                if client.len_files_sent >= file_limit and file_limit > 0:
+                if client.files_sent_len >= file_limit and file_limit:
                     break
                 elif not stayalive:
                     break
@@ -269,4 +267,6 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    from docopt import docopt
+    args = docopt(__doc__)
+    main(args)
