@@ -8,8 +8,9 @@ import sys
 
 
 if sys.argv[-1] == "publish":
-    if os.listdir('dist'):
-        raise Exception("Clean dist/ first.")
+    if os.path.exists('dist/'):
+        if os.listdir('dist'):
+            raise Exception("Clean dist/ first.")
     os.system("python setup.py sdist bdist_wheel --universal")
     os.system("twine upload dist/*")
     sys.exit()
@@ -24,10 +25,11 @@ setup(
     author='Matthew Timms',
     author_email='matthewtimms@live.com.au',
     description='Sharing files over LAN',
-    license=open('LICENSE', 'r').read(),
+    license='MIT',
     url='https://github.com/MattTimms/folan',
     py_modules=['folan'],
     install_requires=REQUIRED,
+    long_description=open('README.rst').read(),
     classifiers=[  # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
@@ -45,6 +47,5 @@ setup(
             'folan = folan:main'
         ]
     },
-    keywords=['file sharing', 'tcp', 'lan'],
-    long_description=open('README.rst').read()
+    keywords=['file sharing', 'tcp', 'lan'],\
 )

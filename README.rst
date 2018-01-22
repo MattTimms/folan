@@ -3,8 +3,6 @@ FoLAN
 
 .. image:: https://badge.fury.io/py/folan.svg
     :target: https://badge.fury.io/py/folan
-.. image:: https://img.shields.io/pypi/pyversions/folan.svg
-    :target: https://pypi.python.org/pypi/folan
 .. image:: https://travis-ci.org/MattTimms/folan.svg?branch=master
     :target: https://travis-ci.org/MattTimms/folan
 
@@ -16,7 +14,6 @@ Have a host listen on particular local ip:port for another host whom is sending 
 
 Usage
 -----
-
 ::
 
     Files over LAN.
