@@ -1,94 +1,77 @@
 from __future__ import print_function, division
 import os
 import time
-import sys
-
-# Sending %filename% |=============| remaing / filesize (KB)
-# files left |
-
-# Clear Line tests
-CLEAR_LINE = '\033[K'
-
-sys.stdout.write('\rWOW')
-sys.stdout.write(CLEAR_LINE)
-sys.stdout.flush()
-sys.stdout.write('\rDONT')
-sys.stdout.write('please')
-time.sleep(1)
-print('')
-sys.stdout.write('start\r')
-time.sleep(1)
-sys.stdout.write(CLEAR_LINE)
-sys.stdout.flush()
-sys.stdout.write('finish')
-
-
-
-# "\n# Trying to Connect... "
-#
-#
-# "Could not connect: {}".format(error)
-# "Connection made"
-# "\nSending file: {}".format(filepath)
-# "\tFilesize is {:.1f} KB...".format(float(filesize) / 1024)
-#
-# "\tDone Sending"
-#
-# "Could not open socket: {}".format(message)
-# "Got connection from {}".format(addr)
-# "\nReceiving file: {}".format(filename)
-# "\tFilesize is {:.1f} KB...".format(float(filesize) / 1024)
-# "File received"
-#
-# filename = "temp.txt"
-# output = "{}\t|\r".format(filename)
-
-
-# filename
-# filesize
-# pass_no
-# - push next
+import threading
 
 
 class PrintyMcPrintington(object):
-    progress_bar_len = 30
-
-    def __init__(self, filename, filesize, socket_buffer_size=4096):
+    def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30, socket_buffer_size=4096):
         self.filename = filename
-        self.filesize = filesize  # Bytes
+        self.filesize = filesize / 1024  # Bytes2Kilobytes
+        self.progress_bar_len = progress_bar_len
         self.socket_buffer_size = socket_buffer_size  # Bytes
-        self._progress_ref = filesize / self.progress_bar_len // socket_buffer_size
-        self._pkts_moved = 0
-        self._print_buffer = ''
-        self._print_header = ''.join(['\r', filename, '\t|'])
+        self.allow_printing = allow_printing
+        self.progress_ref = filesize / self.progress_bar_len / socket_buffer_size  # ratio of pkts moved to '=' icons
+        self.start_time = time.time()
+        self.finish_time = None
+        self.stayalive = True
+        self.pkts_moved = 0
+        self._print_thread = threading.Thread(target=self.print_thread).start()
 
-    @property
-    def pkts_moved(self):
-        return self._pkts_moved
+    def print_thread(self):
+        while self.stayalive:
+            progress = int(self.pkts_moved / self.progress_ref)
+            output = '\r%s\t|%s%s| %.1f /%.1fKB  elapse:%is' % (
+                self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress),
+                self.pkts_moved * self.socket_buffer_size, self.filesize, time.time() - self.start_time)
+            print(output, end='')
+            time.sleep(0.1)
 
-    @pkts_moved.setter
-    def pkts_moved(self, number):
-        self._pkts_moved += number
-        self.foo() # TODO update display
-        pass
+    @classmethod
+    def current_file(cls, filepath):
+        _, filename = os.path.split(filepath)
+        filesize = os.path.getsize(filepath)
+        return PrintyMcPrintington(filename, filesize)
 
-    def foo(self):
-        sys.stdout.write('\r')
-        sys.stdout.write(CLEAR_LINE)
-        output = ''.join([self._print_header, self._print_body, self._print_tail])
-        sys.stdout.write(output)
+    def release_gracefully(self):
+        self.stayalive = False
+        self.finish_time = time.time()
+        elapse_time = self.finish_time - self.start_time
+        while self._print_thread is not None:
+            pass
+        output = '\r%s\t|%s| size:%.1fKB  elapse:%is  rate:%.1f KB/s' % (
+            self.filename, '=' * self.progress_bar_len, self.filesize, elapse_time, self.filesize / elapse_time)
+        print(output)
 
-    @property
-    def _print_body(self):
-        progress = int(self.pkts_moved / self._progress_ref)
-        return '{}{}'.format('=' * progress, ' ' * (self.progress_bar_len - progress))
+    def release_violently(self):
+        self.stayalive = False
+        self.finish_time = time.time()
+        while self._print_thread is not None:
+            pass
+        progress = int(self.pkts_moved / self.progress_ref)
+        output = '\r%s\t|%sX%s| Connection broken!' % (
+            self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress - 1),)
+        print(output)
 
-    @property
-    def _print_tail(self):
-        return '|  {0:.2f} /{1:.2f}KB'.format((self.pkts_moved * self.socket_buffer_size / 1024), (self.filesize/1024))
+    def print_decorator(self, some_function):
+        def wrapper(*args, **kwargs):
+            if self.allow_printing:
+                some_function(*args, **kwargs)
+        return wrapper
 
 
-a = PrintyMcPrintington('temp.txt', 1048576)
-for i in range(16):
-    a.pkts_moved = i
-    time.sleep(0.4)
+if __name__ == '__main__':
+    filename = 'temp.txt'
+    filesize = 262994
+    printy = PrintyMcPrintington(filename, filesize)
+    for i in range(5):
+        printy.pkts_moved += 1
+        time.sleep(0.5)
+    printy.release_gracefully()
+    printy = PrintyMcPrintington(filename, filesize)
+    for i in range(5):
+        printy.pkts_moved += 1
+        time.sleep(0.5)
+    printy.release_violently()
+    printy = PrintyMcPrintington(filename, filesize)
+    printy.release_violently()
