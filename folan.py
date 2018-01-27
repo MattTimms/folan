@@ -21,9 +21,11 @@ Options:
 """
 
 from __future__ import print_function
+from tests.test_print_methods import PrintyMcPrintington
 import socket
 import struct
 import os
+import time
 
 __all__ = ['folan']
 __version__ = '1.1.2'
@@ -37,17 +39,20 @@ class Client(object):
         self.sock = None
         self.buffer_size = 4096
         self.files_sent_len = 0
+        self.printer = None
 
     def connect(self):
         """ Returns 1 if successfully connects with target host else 0 after timeout """
-        self._print_dbg("\n# Trying to Connect...", True)
+        if self.printer is not None and self.printer.finish_time is None:
+            self.printer.release_violently()
+        self._print_dbg("\r# Trying to Connect... ", end='')
         self.sock = socket.socket()
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
         self.sock.settimeout(self.timeout)
         try:
             self.sock.connect(self.dest)
         except socket.error as error:
-            self._print_dbg("Could not connect: {}".format(error))
+            self._print_dbg("Could not connect: {}".format(error), end=' ')
             return 0
         self._print_dbg("Connection made")
         return 1
@@ -56,14 +61,13 @@ class Client(object):
         self.sock.close()
 
     def send_file(self, filepath):
-        self._print_dbg("\nSending file: {}".format(filepath))
+        self.printer = PrintyMcPrintington.current_file(filepath)
         _, filename = os.path.split(filepath)
         filename_size = struct.pack('I', len(filename))
         self.sock.send(filename_size)  # Length of next expected pkt sent
         self.sock.send(filename.encode())
 
         filesize = os.path.getsize(filepath)
-        self._print_dbg("\tFilesize is {:.1f} KB...".format(float(filesize)/1024), True)
         sizepack = struct.pack('I', filesize)
         self.sock.send(sizepack)
 
@@ -72,18 +76,15 @@ class Client(object):
             while buff:
                 self.sock.send(buff)
                 buff = f.read(self.buffer_size)
+                self.printer.pkts_moved += 1
 
-        verify = self.sock.recv(13).decode()
-        self._print_dbg(verify)
+        self.sock.recv(13).decode()  # TODO
+        self.printer.release_gracefully()
         self.files_sent_len += 1
-        self._print_dbg("\tDone Sending")
 
-    def _print_dbg(self, string, newline=False):
+    def _print_dbg(self, *args, **kwargs):
         if self.debug:
-            if newline:
-                print(string, end=' ')
-            else:
-                print(string)
+            print(*args, **kwargs)
 
 
 class Server(object):
@@ -95,17 +96,20 @@ class Server(object):
         self.conn = None
         self.buffer_size = 4096
         self.files_recv_len = 0
+        self.printer = None
 
     def connect(self):
         """ Returns 1 if successfully connects with target host else 0 after timeout """
-        self._print_dbg("\n# Trying to Connect...", True)
+        if self.printer is not None and self.printer.finish_time is None:
+            self.printer.release_violently()
+        self._print_dbg("\r# Trying to Connect... ", end='')
         try:
             self.sock = socket.socket()
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.bind(self.dest)
             self.sock.listen(self.timeout)
         except socket.error as message:
-            self._print_dbg("Could not open socket: {}".format(message))
+            self._print_dbg("Could not open socket: {}".format(message), end=' ')
             return 0
         self.sock.settimeout(self.timeout)
         try:
@@ -122,13 +126,14 @@ class Server(object):
     def recv_file(self, save_directory=''):
         """ Receives file and writes into save_directory """
         filename_size = self.conn.recv(struct.calcsize("!I"))
+        if len(filename_size) == 0:
+            raise socket.error("Socket closure")
         filename_size = struct.unpack('I', filename_size)[0]
         filename = self.conn.recv(filename_size).decode()
-        self._print_dbg("\nReceiving file: {}".format(filename))
 
         sizepack = self.conn.recv(struct.calcsize('!I'))
         filesize = struct.unpack('I', sizepack)[0]
-        self._print_dbg("\tFilesize is {:.1f} KB...".format(float(filesize)/1024), True)
+        self.printer = PrintyMcPrintington(filename, filesize)
 
         filepath = ''.join([save_directory, filename])
         with open(filepath, 'wb') as f:
@@ -137,19 +142,17 @@ class Server(object):
                     data = self.conn.recv(self.buffer_size)
                     if len(data) == 0:
                         raise socket.error("Socket closure")
+                    self.printer.pkts_moved += 1
                     f.write(data)
                     if f.tell() == filesize:
                         break
         self.conn.send("File received".encode())
         self.files_recv_len += 1
-        self._print_dbg("File received")
+        self.printer.release_gracefully()
 
-    def _print_dbg(self, string, newline=False):
+    def _print_dbg(self, *args, **kwargs):
         if self.debug:
-            if newline:
-                print(string, end=' ')
-            else:
-                print(string)
+            print(*args, **kwargs)
 
 
 def main(args):
@@ -195,6 +198,7 @@ def main(args):
         client = Client(ip, port, debug=True)
         while not client.connect():
             print('Ensure end host is running and target ip:port are correct.')
+            time.sleep(0.5)
             pass
 
         if args['files']:
