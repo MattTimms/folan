@@ -1,53 +1,56 @@
 from __future__ import print_function
+import common
 import os
-import sys
 import filecmp
-import shutil
-import time
 import threading
+import shutil
+import unittest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-import folan
-
-arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/', '--stayalive': False,
-            '--limit': None, 'send': False, 'files': False, '<file_path>': [], 'dir': False, '<dir_path>': None,
-            '--help': False}
+here = os.path.dirname(__file__)
 
 
-def write_dummy_file(filename='temp.txt', filesize=1048576):
-    """ Creates 1MB temporary file """
-    with open(filename, 'wb') as f:
-        size = filesize
-        f.write(b"\0" * size)
+class TestPlayingCatchByYourself(unittest.TestCase):
+    def __init__(self, testname):
+        super(TestPlayingCatchByYourself, self).__init__(testname)
+        self.arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/',
+                         '--stayalive': False, '--limit': None, 'send': False, 'files': False, '<file_path>': [],
+                         'dir': False, '<dir_path>': None, '--help': False}
+        self.test_folder = here + '/TestPlayingCatchByYourself/'
+        self.destination_folder = self.test_folder + 'folan_dest/'
+
+    def setUp(self):
+        if os.path.exists(self.test_folder):
+            shutil.rmtree(self.test_folder)
+        os.makedirs(self.test_folder)
+        os.makedirs(self.destination_folder)
+
+    def tearDown(self):
+        shutil.rmtree(self.test_folder)
+
+    def test_throwing_file_locally(self):
+        common.write_dummy_file(self.test_folder + 'temp.txt')
+
+        serv_args = self.arg_dict.copy()
+        serv_args['<ip:port>'] = '127.0.0.1:49999'
+        serv_args['--limit'] = 1
+        serv_args['--save_path'] = self.destination_folder
+        cli_args = self.arg_dict.copy()
+        cli_args['<ip:port>'] = '127.0.0.1:49999'
+        cli_args['files'] = True
+        cli_args['--limit'] = 1
+        cli_args['<file_path>'] = [self.test_folder + 'temp.txt']
+
+        server_thread = threading.Thread(target=common.serv, args=(serv_args,))
+        client_thread = threading.Thread(target=common.cli, args=(cli_args,))
+        server_thread.daemon = True
+        client_thread.daemon = True
+        server_thread.start()
+        client_thread.start()
+        while server_thread.is_alive():
+            pass
+
+        self.assertTrue(filecmp.cmp(self.test_folder + 'temp.txt', self.destination_folder + 'temp.txt', shallow=False))
 
 
-def serv():
-    serv_args = arg_dict.copy()
-    serv_args['<ip:port>'] = '127.0.0.1:49999'
-    serv_args['listen'] = True
-    serv_args['--limit'] = 1
-    folan.main(serv_args)
-
-
-def cli():
-    write_dummy_file()
-    cli_args = arg_dict.copy()
-    cli_args['<ip:port>'] = '127.0.0.1:49999'
-    cli_args['send'] = True
-    cli_args['files'] = True
-    cli_args['<file_path>'] = ['temp.txt']
-    cli_args['--limit'] = 1
-    folan.main(cli_args)
-
-
-def test_throwing_file_locally():
-    server_thread = threading.Thread(target=serv)
-    client_thread = threading.Thread(target=cli)
-    server_thread.start()
-    client_thread.start()
-    while server_thread.is_alive():
-        pass
-
-    assert filecmp.cmp('temp.txt', 'folan_dest/temp.txt', shallow=False)
-    os.remove('temp.txt')
-    shutil.rmtree('folan_dest/')
+if __name__ == '__main__':
+    unittest.main()
