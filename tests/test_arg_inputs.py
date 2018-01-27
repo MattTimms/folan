@@ -63,7 +63,7 @@ def test_directory_send():
     os.makedirs('test_directory_send')
     os.makedirs('test_directory_send/send/')
     os.makedirs('test_directory_send/recv/')
-    for i in range(10):
+    for i in range(3):
         write_dummy_file('test_directory_send/send/{}.txt'.format(str(i)))
 
     serv_args = arg_dict.copy()
@@ -82,7 +82,7 @@ def test_directory_send():
     while client_thread.is_alive():
         pass
 
-    for i in range(10):
+    for i in range(3):
         assert filecmp.cmp('test_directory_send/send/0.txt', 'test_directory_send/recv/{}.txt'.format(str(i)),
                            shallow=False)  # all files sent
     shutil.rmtree('test_directory_send/')

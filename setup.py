@@ -29,7 +29,6 @@ setup(
     url='https://github.com/MattTimms/folan',
     py_modules=['folan'],
     install_requires=REQUIRED,
-    long_description=open('README.rst').read(),
     classifiers=[  # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
         'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',

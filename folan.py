@@ -21,11 +21,11 @@ Options:
 """
 
 from __future__ import print_function
-from tests.test_print_methods import PrintyMcPrintington
 import socket
 import struct
 import os
 import time
+import threading
 
 __all__ = ['folan']
 __version__ = '1.1.2'
@@ -153,6 +153,65 @@ class Server(object):
     def _print_dbg(self, *args, **kwargs):
         if self.debug:
             print(*args, **kwargs)
+
+
+class PrintyMcPrintington(object):
+    def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30, socket_buffer_size=4096):
+        self.filename = filename
+        self.filesize = filesize / 1024  # Bytes2Kilobytes
+        self.progress_bar_len = progress_bar_len
+        self.socket_buffer_size = socket_buffer_size  # Bytes
+        self.allow_printing = allow_printing
+        self.progress_ref = filesize / self.progress_bar_len / socket_buffer_size  # ratio of pkts moved to '=' icons
+        self.start_time = time.time()
+        self.finish_time = None
+        self.stayalive = True
+        self.pkts_moved = 0
+        self._print_thread = threading.Thread(target=self.print_thread).start()
+
+    def print_thread(self):
+        while self.stayalive:
+            if self.progress_ref == 0:
+                progress = 0
+            else:
+                progress = int(self.pkts_moved / self.progress_ref)
+            output = '\r%s\t|%s%s| %i/%iKB  elapse:%is' % (
+                self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress),
+                self.pkts_moved * self.socket_buffer_size / 1024, self.filesize, time.time() - self.start_time)
+            print(output, end='')
+            time.sleep(0.1)
+
+    @classmethod
+    def current_file(cls, filepath):
+        _, filename = os.path.split(filepath)
+        filesize = os.path.getsize(filepath)
+        return PrintyMcPrintington(filename, filesize)
+
+    def release_gracefully(self):
+        self.stayalive = False
+        self.finish_time = time.time()
+        elapse_time = self.finish_time - self.start_time
+        while self._print_thread is not None:
+            pass
+        output = '\r%s\t|%s| size:%iKB  elapse:%is  rate:%.1f KB/s' % (
+            self.filename, '=' * self.progress_bar_len, self.filesize, elapse_time, self.filesize / elapse_time)
+        print(output)
+
+    def release_violently(self):
+        self.stayalive = False
+        self.finish_time = time.time()
+        while self._print_thread is not None:
+            pass
+        progress = int(self.pkts_moved / self.progress_ref)
+        output = '\r%s\t|%sX%s| Connection broken!' % (
+            self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress - 1),)
+        print(output)
+
+    def print_decorator(self, some_function):
+        def wrapper(*args, **kwargs):
+            if self.allow_printing:
+                some_function(*args, **kwargs)
+        return wrapper
 
 
 def main(args):

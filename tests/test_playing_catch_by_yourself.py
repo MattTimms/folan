@@ -23,6 +23,7 @@ def write_dummy_file(filename='temp.txt', filesize=1048576):
 
 def serv():
     serv_args = arg_dict.copy()
+    serv_args['<ip:port>'] = '127.0.0.1:49999'
     serv_args['listen'] = True
     serv_args['--limit'] = 1
     folan.main(serv_args)
@@ -31,9 +32,11 @@ def serv():
 def cli():
     write_dummy_file()
     cli_args = arg_dict.copy()
+    cli_args['<ip:port>'] = '127.0.0.1:49999'
     cli_args['send'] = True
     cli_args['files'] = True
     cli_args['<file_path>'] = ['temp.txt']
+    cli_args['--limit'] = 1
     folan.main(cli_args)
 
 
@@ -41,7 +44,6 @@ def test_throwing_file_locally():
     server_thread = threading.Thread(target=serv)
     client_thread = threading.Thread(target=cli)
     server_thread.start()
-    time.sleep(1)
     client_thread.start()
     while server_thread.is_alive():
         pass
