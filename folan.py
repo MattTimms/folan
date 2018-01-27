@@ -28,7 +28,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.1.2'
+__version__ = '1.1.3'
 
 
 class Client(object):
@@ -167,7 +167,9 @@ class PrintyMcPrintington(object):
         self.finish_time = None
         self.stayalive = True
         self.pkts_moved = 0
-        self._print_thread = threading.Thread(target=self.print_thread).start()
+        self._print_thread = threading.Thread(target=self.print_thread)
+        self._print_thread.daemon = True
+        self._print_thread.start()
 
     def print_thread(self):
         while self.stayalive:

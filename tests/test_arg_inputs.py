@@ -47,6 +47,8 @@ def test_local_dir_save():
 
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
+    server_thread.daemon = True
+    client_thread.daemon = True
     server_thread.start()
     client_thread.start()
     while client_thread.is_alive():
@@ -77,6 +79,8 @@ def test_directory_send():
 
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
+    server_thread.daemon = True
+    client_thread.daemon = True
     server_thread.start()
     client_thread.start()
     while client_thread.is_alive():
@@ -108,6 +112,8 @@ def test_stayalive():
 
     server_thread = threading.Thread(target=serv, args=(serv_args,))
     client_thread = threading.Thread(target=cli, args=(cli_args,))
+    server_thread.daemon = True
+    client_thread.daemon = True
     server_thread.start()
     client_thread.start()
     time.sleep(2)  # enough time for one file to send

@@ -43,6 +43,8 @@ def cli():
 def test_throwing_file_locally():
     server_thread = threading.Thread(target=serv)
     client_thread = threading.Thread(target=cli)
+    server_thread.daemon = True
+    client_thread.daemon = True
     server_thread.start()
     client_thread.start()
     while server_thread.is_alive():
