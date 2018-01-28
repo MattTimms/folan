@@ -28,7 +28,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.1.3'
+__version__ = '1.1.4'
 
 
 class Client(object):
@@ -254,6 +254,7 @@ def main(args):
             except socket.error:
                 while not server.connect():  # reconnect
                     pass
+        server.close()
 
     elif args['send']:
         client = Client(ip, port, debug=True)
