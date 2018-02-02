@@ -12,9 +12,7 @@ here = os.path.dirname(__file__)
 class TestFileConditions(unittest.TestCase):
     def __init__(self, testname):
         super(TestFileConditions, self).__init__(testname)
-        self.arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/',
-                         '--stayalive': False, '--limit': None, 'send': False, 'files': False, '<file_path>': [],
-                         'dir': False, '<dir_path>': None, '--help': False}
+        self.arg_dict = common.ARGS
         self.test_folder = here + '/TestFileConditions/'
         self.destination_folder = self.test_folder + 'folan_dest/'
 
@@ -41,8 +39,8 @@ class TestFileConditions(unittest.TestCase):
 
         server_thread = threading.Thread(target=common.serv, args=(serv_args,))
         client_thread = threading.Thread(target=common.cli, args=(cli_args,))
-        # server_thread.daemon = True
-        # client_thread.daemon = True
+        server_thread.daemon = True
+        client_thread.daemon = True
         server_thread.start()
         client_thread.start()
         while server_thread.is_alive():

@@ -29,11 +29,12 @@ Usage
 
     Example:
       folan.py listen 196.168.0.13:40000 -s . --limit=10
-      folan.py send dir 10.100.192.15:5555 imgs/ --stayalive
+      folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
 
     Options:
       -h --help                 Shows this screen.
       --stayalive               Continues to poll directory and send new files
+      -r, --recursive           Sends directories recursively
       --limit LEN_FILES         Limits number of files to receive before closing
       -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 

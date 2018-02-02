@@ -12,9 +12,7 @@ here = os.path.dirname(__file__)
 class TestPlayingCatchByYourself(unittest.TestCase):
     def __init__(self, testname):
         super(TestPlayingCatchByYourself, self).__init__(testname)
-        self.arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/',
-                         '--stayalive': False, '--limit': None, 'send': False, 'files': False, '<file_path>': [],
-                         'dir': False, '<dir_path>': None, '--help': False}
+        self.arg_dict = common.ARGS
         self.test_folder = here + '/TestPlayingCatchByYourself/'
         self.destination_folder = self.test_folder + 'folan_dest/'
 
