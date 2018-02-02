@@ -4,6 +4,10 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import folan
 
 
+ARGS = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/','--stayalive': False,
+        '--recursive': False, '--limit': None, 'send': False, 'files': False, '<file_path>': [],
+        'dir': False, '<dir_path>': None, '--help': False}
+
 def serv(args):
     args['listen'] = True
     folan.main(args)

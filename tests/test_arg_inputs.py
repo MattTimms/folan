@@ -12,9 +12,7 @@ here = os.path.dirname(__file__)
 class TestArgInputs(unittest.TestCase):
     def __init__(self, testname):
         super(TestArgInputs, self).__init__(testname)
-        self.arg_dict = {'listen': False, '<ip:port>': '127.0.0.1:50000', '--save_path': 'folan_dest/',
-                         '--stayalive': False, '--limit': None, 'send': False, 'files': False, '<file_path>': [],
-                         'dir': False, '<dir_path>': None, '--help': False}
+        self.arg_dict = common.ARGS
         self.test_folder = here + '/TestArgInputs/'
         self.destination_folder = self.test_folder + 'folan_dest/'
 
@@ -104,6 +102,37 @@ class TestArgInputs(unittest.TestCase):
             pass
 
         assert filecmp.cmp(self.test_folder + '1.txt', self.destination_folder + '1.txt',
+                           shallow=False)  # sender stay alive for new file to be sent
+
+    def test_recursive_dir(self):
+        fold_0 = self.test_folder + 'dir/fold_0/'
+        fold_1 = self.test_folder + 'dir/fold_1/'
+        os.makedirs(fold_0)
+        os.makedirs(fold_1)
+        for i in range(2):
+            common.write_dummy_file(fold_0 + '%i.txt' % i, 1024)
+            common.write_dummy_file(fold_1 + '%i.txt' % i, 1024)
+
+        serv_args = self.arg_dict.copy()
+        serv_args['<ip:port>'] = '127.0.0.1:50003'
+        serv_args['--save_path'] = self.destination_folder
+        serv_args['--limit'] = 4
+        cli_args = self.arg_dict.copy()
+        cli_args['<ip:port>'] = '127.0.0.1:50003'
+        cli_args['dir'] = True
+        cli_args['<dir_path>'] = self.test_folder + 'dir/'
+        cli_args['--recursive'] = True
+
+        server_thread = threading.Thread(target=common.serv, args=(serv_args,))
+        client_thread = threading.Thread(target=common.cli, args=(cli_args,))
+        server_thread.daemon = True
+        client_thread.daemon = True
+        server_thread.start()
+        client_thread.start()
+        while server_thread.is_alive():
+            pass
+
+        assert filecmp.cmp(fold_0 + '0.txt', self.destination_folder + 'fold_0/0.txt',
                            shallow=False)  # sender stay alive for new file to be sent
 
 

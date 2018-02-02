@@ -16,6 +16,7 @@ Example:
 Options:
   -h --help                 Shows this screen.
   --stayalive               Continues to poll directory and send new files
+  -r, --recursive           Sends directories recursively
   --limit LEN_FILES         Limits number of files to receive before closing
   -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 """
@@ -28,7 +29,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.1.3'
+__version__ = '1.1.5'
 
 
 class Client(object):
@@ -40,6 +41,7 @@ class Client(object):
         self.buffer_size = 4096
         self.files_sent_len = 0
         self.printer = None
+        self.trim_root = None
 
     def connect(self):
         """ Returns 1 if successfully connects with target host else 0 after timeout """
@@ -60,9 +62,17 @@ class Client(object):
     def close(self):
         self.sock.close()
 
+    def allow_relative_filenames(self, root):
+        """Tells send_file() to send the relative filepath with root trimmed off."""
+        self.trim_root = root
+
     def send_file(self, filepath):
         self.printer = PrintyMcPrintington.current_file(filepath)
-        _, filename = os.path.split(filepath)
+        if self.trim_root is None:
+            _, filename = os.path.split(filepath)
+        else:
+            filename = filepath.replace(self.trim_root, '')
+
         filename_size = struct.pack('I', len(filename))
         self.sock.send(filename_size)  # Length of next expected pkt sent
         self.sock.send(filename.encode())
@@ -135,7 +145,11 @@ class Server(object):
         filesize = struct.unpack('I', sizepack)[0]
         self.printer = PrintyMcPrintington(filename, filesize)
 
-        filepath = ''.join([save_directory, filename])
+        path, filename = os.path.split(filename)
+        if path:
+            if not os.path.exists(save_directory + path):
+                os.makedirs(save_directory + path)
+        filepath = ''.join([save_directory, path, '/', filename])
         with open(filepath, 'wb') as f:
             if filesize:
                 while True:
@@ -167,7 +181,9 @@ class PrintyMcPrintington(object):
         self.finish_time = None
         self.stayalive = True
         self.pkts_moved = 0
-        self._print_thread = threading.Thread(target=self.print_thread).start()
+        self._print_thread = threading.Thread(target=self.print_thread)
+        self._print_thread.daemon = True
+        self._print_thread.start()
 
     def print_thread(self):
         while self.stayalive:
@@ -185,14 +201,14 @@ class PrintyMcPrintington(object):
     def current_file(cls, filepath):
         _, filename = os.path.split(filepath)
         filesize = os.path.getsize(filepath)
-        return PrintyMcPrintington(filename, filesize)
+        return PrintyMcPrintington(filepath, filesize)
 
     def release_gracefully(self):
         self.stayalive = False
         self.finish_time = time.time()
         elapse_time = self.finish_time - self.start_time
-        while self._print_thread is not None:
-            pass
+        if self._print_thread is not None:
+            self._print_thread.join()
         output = '\r%s\t|%s| size:%iKB  elapse:%is  rate:%.1f KB/s' % (
             self.filename, '=' * self.progress_bar_len, self.filesize, elapse_time, self.filesize / elapse_time)
         print(output)
@@ -200,8 +216,8 @@ class PrintyMcPrintington(object):
     def release_violently(self):
         self.stayalive = False
         self.finish_time = time.time()
-        while self._print_thread is not None:
-            pass
+        if self._print_thread is not None:
+            self._print_thread.join()
         progress = int(self.pkts_moved / self.progress_ref)
         output = '\r%s\t|%sX%s| Connection broken!' % (
             self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress - 1),)
@@ -292,9 +308,17 @@ def main(args):
                 file_limit = 0
             stayalive = args['--stayalive']
 
+            if args['--recursive']:
+                client.allow_relative_filenames(dir_path)
+
             file_history = []
             while True:
-                filelist = [''.join([dir_path, f]) for f in os.listdir(dir_path) if os.path.isfile(dir_path + f)]
+                filelist = []
+                for root, directories, filenames in os.walk(dir_path):
+                    filepaths = [os.path.join(root, filename) for filename in filenames]
+                    filelist.extend([filepath for filepath in filepaths if os.path.isfile(filepath)])
+                    if not args['--recursive']:
+                        break
                 new_files = [f for f in filelist if f not in file_history]
                 file_history.extend(new_files)
 
