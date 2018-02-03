@@ -29,7 +29,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.1.5'
+__version__ = '1.1.6'
 
 
 class Client(object):
@@ -233,14 +233,16 @@ class PrintyMcPrintington(object):
 def main(args):
     if not isinstance(args, dict):
         raise TypeError("args expected as dictionary")
-    
+    if '--debug' not in args.keys():
+        args['--debug'] = True
+
     ip, port = args['<ip:port>'].split(':')
     if ip == '\'\'':  # docopt's response to '' input
         ip = ''  # default interface
     port = int(port)
 
     if args['listen']:
-        server = Server(ip, port, debug=True)
+        server = Server(ip, port, debug=args['--debug'])
 
         save_directory = args['--save_path']
         if save_directory[-1] != '/':
@@ -271,7 +273,7 @@ def main(args):
         server.close()
 
     elif args['send']:
-        client = Client(ip, port, debug=True)
+        client = Client(ip, port, debug=args['--debug')
         while not client.connect():
             print('Ensure end host is running and target ip:port are correct.')
             time.sleep(0.5)
