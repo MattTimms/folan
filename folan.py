@@ -21,7 +21,7 @@ Options:
   -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
 """
 
-from __future__ import print_function
+from __future__ import print_function, division
 import socket
 import struct
 import os
@@ -67,11 +67,11 @@ class Client(object):
         self.trim_root = root
 
     def send_file(self, filepath):
-        self.printer = PrintyMcPrintington.current_file(filepath)
         if self.trim_root is None:
             _, filename = os.path.split(filepath)
         else:
             filename = filepath.replace(self.trim_root, '')
+        self.printer = PrintyMcPrintington.current_file(filepath, filename)
 
         filename_size = struct.pack('I', len(filename))
         self.sock.send(filename_size)  # Length of next expected pkt sent
@@ -176,7 +176,10 @@ class PrintyMcPrintington(object):
         self.progress_bar_len = progress_bar_len
         self.socket_buffer_size = socket_buffer_size  # Bytes
         self.allow_printing = allow_printing
-        self.progress_ref = filesize / self.progress_bar_len / socket_buffer_size  # ratio of pkts moved to '=' icons
+        if filesize < socket_buffer_size:
+            self.progress_ref = 1 / self.progress_bar_len
+        else:
+            self.progress_ref = filesize / self.progress_bar_len / socket_buffer_size  # ratio of pkts moved to '=' icons
         self.start_time = time.time()
         self.finish_time = None
         self.stayalive = True
@@ -198,10 +201,10 @@ class PrintyMcPrintington(object):
             time.sleep(0.1)
 
     @classmethod
-    def current_file(cls, filepath):
+    def current_file(cls, filepath, filename=None):
         _, filename = os.path.split(filepath)
         filesize = os.path.getsize(filepath)
-        return PrintyMcPrintington(filepath, filesize)
+        return PrintyMcPrintington(filename, filesize)
 
     def release_gracefully(self):
         self.stayalive = False
@@ -273,7 +276,7 @@ def main(args):
         server.close()
 
     elif args['send']:
-        client = Client(ip, port, debug=args['--debug')
+        client = Client(ip, port, debug=args['--debug'])
         while not client.connect():
             print('Ensure end host is running and target ip:port are correct.')
             time.sleep(0.5)
@@ -325,22 +328,19 @@ def main(args):
                 file_history.extend(new_files)
 
                 if new_files:
-                    len_newfiles_sent = 0
-                    file_path = new_files[len_newfiles_sent]
                     while True:
+                        if client.files_sent_len >= file_limit and file_limit:
+                            break
+                        elif not new_files:
+                            break
+                        file_path = new_files.pop(0)
+
                         if not os.path.exists(file_path):
                             print("Path to file is incorrect: ", file_path)
-                            new_files.pop(client.files_sent_len)
-
-                        if len_newfiles_sent == len(new_files):
-                            break
-                        elif client.files_sent_len >= file_limit and file_limit:
-                            break
-                        file_path = new_files[len_newfiles_sent]
+                            continue
 
                         try:
                             client.send_file(file_path)
-                            len_newfiles_sent += 1
                         except KeyboardInterrupt:
                             print('KeyboardInterrupt')
                             break
