@@ -12,24 +12,28 @@ Usage:
 Example:
   folan.py listen 196.168.0.13:40000 -s . --limit=10
   folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
+  folan.py send files '':8081 --limit=25mb data/1.jpg data/2.jpg data/3.jpg
 
 Options:
-  -h --help                 Shows this screen.
-  --stayalive               Continues to poll directory and send new files
-  -r, --recursive           Sends directories recursively
-  --limit LEN_FILES         Limits number of files to receive before closing
-  -s, --save_path DIR_PATH  Path to saving directory [default: folan_dest/].
+  -h --help                     Shows this screen.
+  --stayalive                   Continues to poll directory and send new files
+  -r, --recursive               Sends directories recursively
+  -s, --save_path DIR_PATH      Path to saving directory [default: folan_dest/].
+  --limit LEN_FILES|DATA_USAGE  Limits number of files or data usage used to receive/send before closing
+                                    Data usage limit is in Bytes by appending case-insensitive b, kb, mb, gb
+
 """
 
 from __future__ import print_function, division
 import socket
 import struct
 import os
+import re
 import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.1.6'
+__version__ = '1.2.0'
 
 
 class Client(object):
@@ -42,9 +46,10 @@ class Client(object):
         self.files_sent_len = 0
         self.printer = None
         self.trim_root = None
+        self.data_sent = 0
 
     def connect(self):
-        """ Returns 1 if successfully connects with target host else 0 after timeout """
+        """ Returns 1 if successfully connects with target host else 0 after timeout. """
         if self.printer is not None and self.printer.finish_time is None:
             self.printer.release_violently()
         self._print_dbg("\r# Trying to Connect... ", end='')
@@ -63,7 +68,7 @@ class Client(object):
         self.sock.close()
 
     def allow_relative_filenames(self, root):
-        """Tells send_file() to send the relative filepath with root trimmed off."""
+        """ Tells send_file() to send the relative filepath with root trimmed off. """
         self.trim_root = root
 
     def send_file(self, filepath):
@@ -76,17 +81,21 @@ class Client(object):
         filename_size = struct.pack('I', len(filename))
         self.sock.send(filename_size)  # Length of next expected pkt sent
         self.sock.send(filename.encode())
+        self.data_sent += 4 + len(filename)  # struct msgs are 4 bytes
 
         filesize = os.path.getsize(filepath)
         sizepack = struct.pack('I', filesize)
         self.sock.send(sizepack)
+        self.data_sent += 4
 
-        with open(filepath, 'rb') as f:
-            buff = f.read(self.buffer_size)
-            while buff:
-                self.sock.send(buff)
+        if filesize:
+            with open(filepath, 'rb') as f:
                 buff = f.read(self.buffer_size)
-                self.printer.pkts_moved += 1
+                while buff:
+                    self.sock.send(buff)
+                    self.data_sent += len(buff)
+                    self.printer.data_moved += len(buff)
+                    buff = f.read(self.buffer_size)
 
         self.sock.recv(13).decode()  # TODO
         self.printer.release_gracefully()
@@ -107,9 +116,10 @@ class Server(object):
         self.buffer_size = 4096
         self.files_recv_len = 0
         self.printer = None
+        self.data_recv = 0
 
     def connect(self):
-        """ Returns 1 if successfully connects with target host else 0 after timeout """
+        """ Returns 1 if successfully connects with target host else 0 after timeout. """
         if self.printer is not None and self.printer.finish_time is None:
             self.printer.release_violently()
         self._print_dbg("\r# Trying to Connect... ", end='')
@@ -134,15 +144,17 @@ class Server(object):
         self.sock.close()
 
     def recv_file(self, save_directory=''):
-        """ Receives file and writes into save_directory """
+        """ Receives file and writes into save_directory. """
         filename_size = self.conn.recv(struct.calcsize("!I"))
         if len(filename_size) == 0:
             raise socket.error("Socket closure")
         filename_size = struct.unpack('I', filename_size)[0]
         filename = self.conn.recv(filename_size).decode()
+        self.data_recv += filename_size + 4
 
         sizepack = self.conn.recv(struct.calcsize('!I'))
         filesize = struct.unpack('I', sizepack)[0]
+        self.data_recv += 4
         self.printer = PrintyMcPrintington(filename, filesize)
 
         path, filename = os.path.split(filename)
@@ -156,7 +168,8 @@ class Server(object):
                     data = self.conn.recv(self.buffer_size)
                     if len(data) == 0:
                         raise socket.error("Socket closure")
-                    self.printer.pkts_moved += 1
+                    self.data_recv += len(data)
+                    self.printer.data_moved += len(data)
                     f.write(data)
                     if f.tell() == filesize:
                         break
@@ -170,33 +183,27 @@ class Server(object):
 
 
 class PrintyMcPrintington(object):
-    def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30, socket_buffer_size=4096):
+    def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30):
         self.filename = filename
         self.filesize = filesize / 1024  # Bytes2Kilobytes
         self.progress_bar_len = progress_bar_len
-        self.socket_buffer_size = socket_buffer_size  # Bytes
         self.allow_printing = allow_printing
-        if filesize < socket_buffer_size:
-            self.progress_ref = 1 / self.progress_bar_len
-        else:
-            self.progress_ref = filesize / self.progress_bar_len / socket_buffer_size  # ratio of pkts moved to '=' icons
         self.start_time = time.time()
         self.finish_time = None
         self.stayalive = True
-        self.pkts_moved = 0
+        self.data_moved = 0
         self._print_thread = threading.Thread(target=self.print_thread)
         self._print_thread.daemon = True
         self._print_thread.start()
 
     def print_thread(self):
         while self.stayalive:
-            if self.progress_ref == 0:
-                progress = 0
-            else:
-                progress = int(self.pkts_moved / self.progress_ref)
+            progress = 0
+            if self.filesize:
+                progress = int(self.data_moved / 1024 / self.filesize) * self.progress_bar_len
             output = '\r%s\t|%s%s| %i/%iKB  elapse:%is' % (
                 self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress),
-                self.pkts_moved * self.socket_buffer_size / 1024, self.filesize, time.time() - self.start_time)
+                self.data_moved / 1024, self.filesize, time.time() - self.start_time)
             print(output, end='')
             time.sleep(0.1)
 
@@ -221,7 +228,9 @@ class PrintyMcPrintington(object):
         self.finish_time = time.time()
         if self._print_thread is not None:
             self._print_thread.join()
-        progress = int(self.pkts_moved / self.progress_ref)
+        progress = 0
+        if self.filesize:
+            progress = int(self.data_moved / 1024 / self.filesize) * self.progress_bar_len
         output = '\r%s\t|%sX%s| Connection broken!' % (
             self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress - 1),)
         print(output)
@@ -244,16 +253,25 @@ def main(args):
         ip = ''  # default interface
     port = int(port)
 
+    file_limit = 0
+    data_rate_limit = 0
+    if args['--limit'] is not None:
+        try:
+            file_limit = int(args['--limit'])
+            data_rate_limit = 0
+        except ValueError:
+            data_rate_limit, units = re.split('(\d+)', args['--limit'])[1:]
+            if units.upper() not in ['B', 'KB', 'MB', 'GB']:
+                raise ValueError("--limit was given an unsupported data amount unit\n%s" % __doc__)
+            data_rate_limit = int(data_rate_limit) * 1024 * ['B', 'KB', 'MB', 'GB'].index(units.upper())
+            file_limit = 0
+
     if args['listen']:
         server = Server(ip, port, debug=args['--debug'])
 
         save_directory = args['--save_path']
         if save_directory[-1] != '/':
             save_directory += '/'
-        if args['--limit'] is not None:
-            file_limit = int(args['--limit'])
-        else:
-            file_limit = 0
 
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
@@ -262,7 +280,9 @@ def main(args):
             pass
 
         while True:
-            if server.files_recv_len == file_limit and file_limit > 0:
+            if file_limit and server.files_recv_len == file_limit:
+                break
+            elif data_rate_limit and server.data_recv >= data_rate_limit:
                 break
 
             try:
@@ -307,10 +327,6 @@ def main(args):
             dir_path = args['<dir_path>']
             if dir_path[-1] != '/':
                 dir_path += '/'
-            if args['--limit'] is not None:
-                file_limit = int(args['--limit'])
-            else:
-                file_limit = 0
             stayalive = args['--stayalive']
 
             if args['--recursive']:
@@ -329,8 +345,11 @@ def main(args):
 
                 if new_files:
                     while True:
-                        if client.files_sent_len >= file_limit and file_limit:
+                        if file_limit and client.files_sent_len >= file_limit:
                             break
+                        elif data_rate_limit and client.data_sent >= data_rate_limit:
+                            break
+
                         elif not new_files:
                             break
                         file_path = new_files.pop(0)
@@ -347,7 +366,9 @@ def main(args):
                         except socket.error:
                             while not client.connect():
                                 pass
-                if client.files_sent_len >= file_limit and file_limit:
+                if file_limit and client.files_sent_len >= file_limit:
+                    break
+                elif data_rate_limit and client.data_sent >= data_rate_limit:
                     break
                 elif not stayalive:
                     break

@@ -135,6 +135,33 @@ class TestArgInputs(unittest.TestCase):
         assert filecmp.cmp(fold_0 + '0.txt', self.destination_folder + 'fold_0/0.txt',
                            shallow=False)  # sender stay alive for new file to be sent
 
+    def test_data_limit(self):
+        no_of_files = 2
+        for i in range(no_of_files):
+            common.write_dummy_file(self.test_folder + '{}.txt'.format(str(i)), filesize=3*1024**2)
+
+        serv_args = self.arg_dict.copy()
+        serv_args['<ip:port>'] = '127.0.0.1:50004'
+        serv_args['--save_path'] = self.destination_folder
+        serv_args['--limit'] = 1
+        cli_args = self.arg_dict.copy()
+        cli_args['<ip:port>'] = '127.0.0.1:50004'
+        cli_args['dir'] = True
+        cli_args['<dir_path>'] = self.test_folder
+        cli_args['--limit'] = '3mb'
+
+        server_thread = threading.Thread(target=common.serv, args=(serv_args,))
+        client_thread = threading.Thread(target=common.cli, args=(cli_args,))
+        server_thread.daemon = True
+        client_thread.daemon = True
+        server_thread.start()
+        client_thread.start()
+        while client_thread.is_alive():
+            pass
+        server_thread.join(timeout=1)
+
+        self.assertTrue(filecmp.cmp(self.test_folder + '0.txt', self.destination_folder + '0.txt', shallow=False))
+
 
 if __name__ == '__main__':
     unittest.main()
