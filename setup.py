@@ -43,7 +43,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'folan = folan:main'
+            'folan = folan'
         ]
     },
     keywords=['file sharing', 'tcp', 'lan'],\
