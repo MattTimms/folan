@@ -33,7 +33,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 
 
 class Client(object):
