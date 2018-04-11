@@ -33,7 +33,7 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.2.1'
+__version__ = '1.2.2'
 
 
 class Client(object):
@@ -242,6 +242,12 @@ class PrintyMcPrintington(object):
         return wrapper
 
 
+def cl_entry_point():
+    from docopt import docopt
+    args = docopt(__doc__)
+    main(args)
+
+
 def main(args):
     if not isinstance(args, dict):
         raise TypeError("args expected as dictionary")
@@ -378,6 +384,4 @@ def main(args):
 
 
 if __name__ == '__main__':
-    from docopt import docopt
-    args = docopt(__doc__)
-    main(args)
+    cl_entry_point()
