@@ -9,7 +9,7 @@ Usage:
   folan.py send dir <ip:port> <dir_path> [options]
   folan.py (-h | --help)
 
-Example:
+Examples:
   folan.py listen 196.168.0.13:40000 -s . --limit=10
   folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
   folan.py send files '':8081 --limit=25mb data/1.jpg data/2.jpg data/3.jpg
@@ -21,10 +21,11 @@ Options:
   -s, --save_path DIR_PATH      Path to saving directory [default: folan_dest/].
   --limit LEN_FILES|DATA_USAGE  Limits number of files or data usage used to receive/send before closing
                                     Data usage limit is in Bytes by appending case-insensitive b, kb, mb, gb
-
 """
 
 from __future__ import print_function, division
+from warnings import warn
+from math import ceil
 import socket
 import struct
 import os
@@ -33,10 +34,19 @@ import time
 import threading
 
 __all__ = ['folan']
-__version__ = '1.2.2'
+__version__ = '1.2.3'
 
 
 class Client(object):
+    """
+    Sending-side of FoLAN.
+
+    Args:
+        ip (str): IPv4 or IPv6 destination address.
+        port (int): local port number for socket binding.
+        timeout (float): timeout value for socket operations.
+        debug (bool): verbose option.
+    """
     def __init__(self, ip, port, timeout=3, debug=False):
         self.dest = (ip, port)
         self.timeout = timeout
@@ -72,22 +82,26 @@ class Client(object):
         self.trim_root = root
 
     def send_file(self, filepath):
+        """ Sends file at filepath to bound socket. """
         if self.trim_root is None:
             _, filename = os.path.split(filepath)
         else:
             filename = filepath.replace(self.trim_root, '')
-        self.printer = PrintyMcPrintington.current_file(filepath, filename)
+        self.printer = PrintyMcPrintington.current_file(filepath, allow_printing=self.debug)
 
+        # Send filename
         filename_size = struct.pack('I', len(filename))
         self.sock.send(filename_size)  # Length of next expected pkt sent
         self.sock.send(filename.encode())
         self.data_sent += 4 + len(filename)  # struct msgs are 4 bytes
 
+        # Send file size
         filesize = os.path.getsize(filepath)
         sizepack = struct.pack('I', filesize)
         self.sock.send(sizepack)
         self.data_sent += 4
 
+        # Send file
         if filesize:
             with open(filepath, 'rb') as f:
                 buff = f.read(self.buffer_size)
@@ -97,7 +111,8 @@ class Client(object):
                     self.printer.data_moved += len(buff)
                     buff = f.read(self.buffer_size)
 
-        self.sock.recv(13).decode()  # TODO
+        # Receive acknowledgement
+        self.sock.recv(13).decode()
         self.printer.release_gracefully()
         self.files_sent_len += 1
 
@@ -107,6 +122,14 @@ class Client(object):
 
 
 class Server(object):
+    """
+
+    Args:
+        ip (str): IPv4 of target host
+        port (int):
+        timeout (float):
+        debug (bool):
+    """
     def __init__(self, ip, port, timeout=3, debug=False):
         self.dest = (ip, port)
         self.timeout = timeout
@@ -127,7 +150,7 @@ class Server(object):
             self.sock = socket.socket()
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.sock.bind(self.dest)
-            self.sock.listen(self.timeout)
+            self.sock.listen(ceil(self.timeout))
         except socket.error as message:
             self._print_dbg("Could not open socket: {}".format(message), end=' ')
             return 0
@@ -145,6 +168,7 @@ class Server(object):
 
     def recv_file(self, save_directory=''):
         """ Receives file and writes into save_directory. """
+        # Receive filename
         filename_size = self.conn.recv(struct.calcsize("!I"))
         if len(filename_size) == 0:
             raise socket.error("Socket closure")
@@ -152,15 +176,19 @@ class Server(object):
         filename = self.conn.recv(filename_size).decode()
         self.data_recv += filename_size + 4
 
+        # Receive file size
         sizepack = self.conn.recv(struct.calcsize('!I'))
         filesize = struct.unpack('I', sizepack)[0]
         self.data_recv += 4
         self.printer = PrintyMcPrintington(filename, filesize)
 
+        # Create output path if required
         path, filename = os.path.split(filename)
         if path:
             if not os.path.exists(save_directory + path):
                 os.makedirs(save_directory + path)
+
+        # Receive file
         filepath = ''.join([save_directory, path, '/', filename])
         with open(filepath, 'wb') as f:
             if filesize:
@@ -173,6 +201,8 @@ class Server(object):
                     f.write(data)
                     if f.tell() == filesize:
                         break
+
+        # Send file
         self.conn.send("File received".encode())
         self.files_recv_len += 1
         self.printer.release_gracefully()
@@ -183,6 +213,15 @@ class Server(object):
 
 
 class PrintyMcPrintington(object):
+    """
+    Progress bar display for sending/receiving files.
+
+    Args:
+        filename (str): display name of file.
+        filesize (int): filesize in bytes.
+        allow_printing (bool): silences console printing.
+        progress_bar_len (int): character length of progress bar display.
+    """
     def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30):
         self.filename = filename
         self.filesize = filesize / 1024  # Bytes2Kilobytes
@@ -197,6 +236,7 @@ class PrintyMcPrintington(object):
         self._print_thread.start()
 
     def print_thread(self):
+        """ Console printing thread. """
         while self.stayalive:
             progress = 0
             if self.filesize:
@@ -208,12 +248,13 @@ class PrintyMcPrintington(object):
             time.sleep(0.1)
 
     @classmethod
-    def current_file(cls, filepath, filename=None):
+    def current_file(cls, filepath, allow_printing=True, progress_bar_len=30):
         _, filename = os.path.split(filepath)
         filesize = os.path.getsize(filepath)
-        return PrintyMcPrintington(filename, filesize)
+        return PrintyMcPrintington(filename, filesize, allow_printing, progress_bar_len)
 
     def release_gracefully(self):
+        """ Finishes printing for completed file transmission. """
         self.stayalive = False
         self.finish_time = time.time()
         elapse_time = self.finish_time - self.start_time
@@ -224,6 +265,7 @@ class PrintyMcPrintington(object):
         print(output)
 
     def release_violently(self):
+        """ Finishes printing for a broken transmission"""
         self.stayalive = False
         self.finish_time = time.time()
         if self._print_thread is not None:
@@ -243,17 +285,25 @@ class PrintyMcPrintington(object):
 
 
 def cl_entry_point():
+    """ Entry function to allow CLI usage. """
     from docopt import docopt
     args = docopt(__doc__)
     main(args)
 
 
 def main(args):
+    """
+    Sends/receives based on args input; see docstrings for args dict items and usage.
+
+    Args:
+        args (dict): parse arguments.
+    """
     if not isinstance(args, dict):
         raise TypeError("args expected as dictionary")
-    if '--debug' not in args.keys():
+    if '--debug' not in args.keys():  # flag for muting script
         args['--debug'] = True
 
+    # Parse inputs
     ip, port = args['<ip:port>'].split(':')
     if ip == '\'\'':  # docopt's response to '' input
         ip = ''  # default interface
@@ -264,7 +314,6 @@ def main(args):
     if args['--limit'] is not None:
         try:
             file_limit = int(args['--limit'])
-            data_rate_limit = 0
         except ValueError:
             data_rate_limit, units = re.split('(\d+)', args['--limit'])[1:]
             if units.upper() not in ['B', 'KB', 'MB', 'GB']:
@@ -272,19 +321,24 @@ def main(args):
             data_rate_limit = int(data_rate_limit) * 1024 * ['B', 'KB', 'MB', 'GB'].index(units.upper())
             file_limit = 0
 
+    # Receiving processes
     if args['listen']:
         server = Server(ip, port, debug=args['--debug'])
 
+        # Create output directory
         save_directory = args['--save_path']
         if save_directory[-1] != '/':
             save_directory += '/'
-
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
 
+        # Wait for initial connection
+        if args['--debug']:
+            print("Listening on %s:%i" % (ip, port))
         while not server.connect():
             pass
 
+        # Receiving loop
         while True:
             if file_limit and server.files_recv_len == file_limit:
                 break
@@ -301,13 +355,17 @@ def main(args):
                     pass
         server.close()
 
+    # Sending processes
     elif args['send']:
         client = Client(ip, port, debug=args['--debug'])
+
+        # Wait for initial connection
         while not client.connect():
-            print('Ensure end host is running and target ip:port are correct.')
+            warn("Ensure end host is running and target ip:port are correct.")
             time.sleep(0.5)
             pass
 
+        # Sending loop for files
         if args['files']:
             file_paths = args['<file_path>']
             file_path = file_paths[client.files_sent_len]
@@ -329,6 +387,7 @@ def main(args):
                     while not client.connect():
                         pass
 
+        # Sending loop for files directory
         elif args['dir']:
             dir_path = args['<dir_path>']
             if dir_path[-1] != '/':
@@ -378,9 +437,7 @@ def main(args):
                     break
                 elif not stayalive:
                     break
-
         client.close()
-    print("fin.")
 
 
 if __name__ == '__main__':
