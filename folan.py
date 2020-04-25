@@ -9,6 +9,7 @@ Usage:
 
 Examples:
   folan send path/to/file.py
+  folan send path/to/directory
   folan receive 192.168.0.15-4567
 
 Options:

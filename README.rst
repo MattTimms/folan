@@ -29,10 +29,16 @@ Usage
 
     Examples:
       folan send path/to/file.py
+      folan send path/to/directory
       folan receive 192.168.0.15-4567
 
     Options:
       -h --help         Shows this screen.
 
 
+
+Dev Logs
+--------
+- Originated as a project for `Monash UAS <https://monashuas.org/>`_. Versions ``< 2.0.0`` reflect that intention.
+- Recently refreshed as an exercise. Changes inspired by `magic-wormhole <https://github.com/warner/magic-wormhole>`_.
 
