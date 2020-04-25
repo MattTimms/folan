@@ -1,444 +1,221 @@
 """Files over LAN.
-Written by Matthew Timms for MonashUAS
 
-Send/Receives files, or polls directory until user kills process.
+Send & receives files over local area network.
 
 Usage:
-  folan.py listen <ip:port> [--save_path DIR_PATH] [options]
-  folan.py send files <ip:port> [options] <file_path>...
-  folan.py send dir <ip:port> <dir_path> [options]
-  folan.py (-h | --help)
+  folan send <file_path>
+  folan receive <host>
+  folan (-h | --help)
 
 Examples:
-  folan.py listen 196.168.0.13:40000 -s . --limit=10
-  folan.py send dir 10.100.192.15:5555 imgs/ --stayalive --limit=10
-  folan.py send files '':8081 --limit=25mb data/1.jpg data/2.jpg data/3.jpg
+  folan send path/to/file.py
+  folan send path/to/directory
+  folan receive 192.168.0.15-4567
 
 Options:
-  -h --help                     Shows this screen.
-  --stayalive                   Continues to poll directory and send new files
-  -r, --recursive               Sends directories recursively
-  -s, --save_path DIR_PATH      Path to saving directory [default: folan_dest/].
-  --limit LEN_FILES|DATA_USAGE  Limits number of files or data usage used to receive/send before closing
-                                    Data usage limit is in Bytes by appending case-insensitive b, kb, mb, gb
+  -h --help         Shows this screen.
+
 """
 
-from __future__ import print_function, division
-from warnings import warn
-from math import ceil
-import socket
-import struct
 import os
 import re
-import time
-import threading
+import select
+import socket
+import sys
+import tarfile
+import tempfile
+from typing import BinaryIO, Optional, Tuple
 
-__all__ = ['folan']
-__version__ = '1.2.3'
+import psutil
+
+__version__ = '2.0.0'
+
+BUFFER_SIZE = 4096
+PATTERN = b"(.+?)\|(\d+)\|(.+)*"
 
 
-class Client(object):
-    """
-    Sending-side of FoLAN.
+def handle_keyboard_interrupt(func):
+    """ Decorator keyboard interrupts. """
 
-    Args:
-        ip (str): IPv4 or IPv6 destination address.
-        port (int): local port number for socket binding.
-        timeout (float): timeout value for socket operations.
-        debug (bool): verbose option.
-    """
-    def __init__(self, ip, port, timeout=3, debug=False):
-        self.dest = (ip, port)
-        self.timeout = timeout
-        self.debug = debug
-        self.sock = None
-        self.buffer_size = 4096
-        self.files_sent_len = 0
-        self.printer = None
-        self.trim_root = None
-        self.data_sent = 0
-
-    def connect(self):
-        """ Returns 1 if successfully connects with target host else 0 after timeout. """
-        if self.printer is not None and self.printer.finish_time is None:
-            self.printer.release_violently()
-        self._print_dbg("\r# Trying to Connect... ", end='')
-        self.sock = socket.socket()
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Allow address reuse
-        self.sock.settimeout(self.timeout)
+    def wrapper(*args, **kwargs):
         try:
-            self.sock.connect(self.dest)
-        except socket.error as error:
-            self._print_dbg("Could not connect: {}".format(error), end=' ')
-            return 0
-        self._print_dbg("Connection made")
-        return 1
+            func(*args, **kwargs)
+        except KeyboardInterrupt:
+            print("User interrupted transfer. Closing...")
+            sys.exit(1)
 
-    def close(self):
-        self.sock.close()
-
-    def allow_relative_filenames(self, root):
-        """ Tells send_file() to send the relative filepath with root trimmed off. """
-        self.trim_root = root
-
-    def send_file(self, filepath):
-        """ Sends file at filepath to bound socket. """
-        if self.trim_root is None:
-            _, filename = os.path.split(filepath)
-        else:
-            filename = filepath.replace(self.trim_root, '')
-        self.printer = PrintyMcPrintington.current_file(filepath, allow_printing=self.debug)
-
-        # Send filename
-        filename_size = struct.pack('I', len(filename))
-        self.sock.send(filename_size)  # Length of next expected pkt sent
-        self.sock.send(filename.encode())
-        self.data_sent += 4 + len(filename)  # struct msgs are 4 bytes
-
-        # Send file size
-        filesize = os.path.getsize(filepath)
-        sizepack = struct.pack('I', filesize)
-        self.sock.send(sizepack)
-        self.data_sent += 4
-
-        # Send file
-        if filesize:
-            with open(filepath, 'rb') as f:
-                buff = f.read(self.buffer_size)
-                while buff:
-                    self.sock.send(buff)
-                    self.data_sent += len(buff)
-                    self.printer.data_moved += len(buff)
-                    buff = f.read(self.buffer_size)
-
-        # Receive acknowledgement
-        self.sock.recv(13).decode()
-        self.printer.release_gracefully()
-        self.files_sent_len += 1
-
-    def _print_dbg(self, *args, **kwargs):
-        if self.debug:
-            print(*args, **kwargs)
+    return wrapper
 
 
-class Server(object):
-    """
+@handle_keyboard_interrupt
+def send(file_path: str, host: Tuple[str, int] = ('', 0)):
+    ip, port = host
 
-    Args:
-        ip (str): IPv4 of target host
-        port (int):
-        timeout (float):
-        debug (bool):
-    """
-    def __init__(self, ip, port, timeout=3, debug=False):
-        self.dest = (ip, port)
-        self.timeout = timeout
-        self.debug = debug
-        self.sock = None
-        self.conn = None
-        self.buffer_size = 4096
-        self.files_recv_len = 0
-        self.printer = None
-        self.data_recv = 0
+    # Evaluate file path & pack if directory
+    filename = os.path.basename(file_path)
+    if os.path.isdir(file_path):
+        temp_path = tempfile.NamedTemporaryFile(suffix='.tar.gz').name
+        with tarfile.open(temp_path, "w:gz") as tar:
+            tar.add(file_path, arcname=os.path.basename(file_path))
+        file_path = temp_path
+        filename += '.tar.gz'
 
-    def connect(self):
-        """ Returns 1 if successfully connects with target host else 0 after timeout. """
-        if self.printer is not None and self.printer.finish_time is None:
-            self.printer.release_violently()
-        self._print_dbg("\r# Trying to Connect... ", end='')
+    # Get file size
+    file_size = os.path.getsize(file_path)  # (bytes)
+    if file_size == 0:
+        print("Cannot send an empty file.")
+        sys.exit(1)
+
+    if ip == '':
+        # Collect interface IPv4 addresses
+        interfaces = {
+            name: next(filter(lambda snicaddr: snicaddr.family is socket.AddressFamily.AF_INET, inet_list), None) for
+            name, inet_list in psutil.net_if_addrs().items()}
+        interfaces = {name: snicaddr.address for name, snicaddr in
+                      filter(lambda kv: kv[1] is not None, interfaces.items())}
+
+        # Repeating user prompt for selecting server interface
+        while True:
+            for i, (name, ipv4) in enumerate(interfaces.items()):
+                print(f"{i} {name:<10}: {ipv4}")
+            selection = input("Please select interface to bind to... [no./name]: ")
+
+            if selection in interfaces:  # user gives interface's name
+                ip = interfaces[selection]
+                break
+            try:  # user gives number of interface's index
+                idx = int(selection)
+                ip = list(interfaces.values())[idx]
+                break
+            except (ValueError, IndexError):
+                continue  # input isn't a number or isn't a valid number
+
+    # Create local server
+    server = socket.create_server(address=(ip, port),  # all interfaces, any available port
+                                  family=socket.AF_INET,
+                                  backlog=None,
+                                  reuse_port=True)
+    server.settimeout(0.1)
+    host: Tuple[str, int] = server.getsockname()
+    ip, port = host
+
+    # Notify user of next step
+    print(f"Ready to send {file_size} bytes of file named {filename}.\n"
+          f"On the other computer. please run:\n\n"
+          f"folan receive {ip}-{port}")
+
+    # Wait for client connection
+    conn: Optional[socket.socket] = None
+    while not isinstance(conn, socket.socket):
         try:
-            self.sock = socket.socket()
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.sock.bind(self.dest)
-            self.sock.listen(ceil(self.timeout))
-        except socket.error as message:
-            self._print_dbg("Could not open socket: {}".format(message), end=' ')
-            return 0
-        self.sock.settimeout(self.timeout)
-        try:
-            self.conn, addr = self.sock.accept()
+            conn, addr = server.accept()
         except socket.timeout:
-            return 0
-        self._print_dbg("Got connection from {}".format(addr))
-        return 1
+            # Expect periodic socket timeouts as server waits for client connection.
+            continue
 
-    def close(self):
-        self.conn.close()
-        self.sock.close()
+    # Send file to client
+    try:
+        with conn:
+            with open(file_path, 'rb') as file_obj:
+                # Send file meta first
+                conn.send(f'{filename}|{file_size}|'.encode('utf-8'))
 
-    def recv_file(self, save_directory=''):
-        """ Receives file and writes into save_directory. """
-        # Receive filename
-        filename_size = self.conn.recv(struct.calcsize("!I"))
-        if len(filename_size) == 0:
-            raise socket.error("Socket closure")
-        filename_size = struct.unpack('I', filename_size)[0]
-        filename = self.conn.recv(filename_size).decode()
-        self.data_recv += filename_size + 4
+                # Send file data
+                while buff := file_obj.read(BUFFER_SIZE):
+                    # Check for socket closure behaviour
+                    r_ready, w_ready, _ = select.select([conn], [conn], [], 0.01)
+                    if r_ready:
+                        message_in: bytes = conn.recv(BUFFER_SIZE)
+                        if message_in == b'':  # Socket closed
+                            raise BrokenPipeError
 
-        # Receive file size
-        sizepack = self.conn.recv(struct.calcsize('!I'))
-        filesize = struct.unpack('I', sizepack)[0]
-        self.data_recv += 4
-        self.printer = PrintyMcPrintington(filename, filesize)
-
-        # Create output path if required
-        path, filename = os.path.split(filename)
-        if path:
-            if not os.path.exists(save_directory + path):
-                os.makedirs(save_directory + path)
-
-        # Receive file
-        filepath = ''.join([save_directory, path, '/', filename])
-        with open(filepath, 'wb') as f:
-            if filesize:
-                while True:
-                    data = self.conn.recv(self.buffer_size)
-                    if len(data) == 0:
-                        raise socket.error("Socket closure")
-                    self.data_recv += len(data)
-                    self.printer.data_moved += len(data)
-                    f.write(data)
-                    if f.tell() == filesize:
-                        break
-
-        # Send file
-        self.conn.send("File received".encode())
-        self.files_recv_len += 1
-        self.printer.release_gracefully()
-
-    def _print_dbg(self, *args, **kwargs):
-        if self.debug:
-            print(*args, **kwargs)
+                    # Send bytes to client
+                    conn.send(buff)
+    except (socket.timeout, BrokenPipeError, KeyboardInterrupt):
+        pass
+    except ConnectionResetError:
+        print("Connection was refused. Closing...")
+        sys.exit(1)
+    finally:
+        print(f"Finished sending {filename} to {addr}")
 
 
-class PrintyMcPrintington(object):
-    """
-    Progress bar display for sending/receiving files.
+@handle_keyboard_interrupt
+def receive(ip: str, port: int):
+    # Connect to host sender
+    try:
+        client = socket.create_connection(address=(ip, port),
+                                          timeout=0.5)
+    except ConnectionRefusedError:
+        print("Connection was refused. Is sender still running?")
+        sys.exit(1)
 
-    Args:
-        filename (str): display name of file.
-        filesize (int): filesize in bytes.
-        allow_printing (bool): silences console printing.
-        progress_bar_len (int): character length of progress bar display.
-    """
-    def __init__(self, filename, filesize, allow_printing=True, progress_bar_len=30):
-        self.filename = filename
-        self.filesize = filesize / 1024  # Bytes2Kilobytes
-        self.progress_bar_len = progress_bar_len
-        self.allow_printing = allow_printing
-        self.start_time = time.time()
-        self.finish_time = None
-        self.stayalive = True
-        self.data_moved = 0
-        self._print_thread = threading.Thread(target=self.print_thread)
-        self._print_thread.daemon = True
-        self._print_thread.start()
+    file_obj: Optional[BinaryIO] = None
+    filename: Optional[str] = None
+    file_size: Optional[int] = None  # (bytes)
+    try:
+        with client:
+            while True:
+                # Check socket is readable
+                r_ready, w_ready, _ = select.select([client], [client], [], 0.01)
 
-    def print_thread(self):
-        """ Console printing thread. """
-        while self.stayalive:
-            progress = 0
-            if self.filesize:
-                progress = int(self.data_moved / 1024 / self.filesize) * self.progress_bar_len
-            output = '\r%s\t|%s%s| %i/%iKB  elapse:%is' % (
-                self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress),
-                self.data_moved / 1024, self.filesize, time.time() - self.start_time)
-            print(output, end='')
-            time.sleep(0.1)
+                # Read socket
+                if r_ready:
+                    message_in: bytes = client.recv(BUFFER_SIZE)
 
-    @classmethod
-    def current_file(cls, filepath, allow_printing=True, progress_bar_len=30):
-        _, filename = os.path.split(filepath)
-        filesize = os.path.getsize(filepath)
-        return PrintyMcPrintington(filename, filesize, allow_printing, progress_bar_len)
+                    if message_in == b'':  # Socket closed
+                        raise BrokenPipeError
+                    elif filename is None:  # On first socket read
 
-    def release_gracefully(self):
-        """ Finishes printing for completed file transmission. """
-        self.stayalive = False
-        self.finish_time = time.time()
-        elapse_time = self.finish_time - self.start_time
-        if self._print_thread is not None:
-            self._print_thread.join()
-        output = '\r%s\t|%s| size:%iKB  elapse:%is  rate:%.1f KB/s' % (
-            self.filename, '=' * self.progress_bar_len, self.filesize, elapse_time, self.filesize / elapse_time)
-        print(output)
+                        # Expected start of stream to receive file meta
+                        match = re.match(PATTERN, message_in)
+                        if match is None:
+                            raise ValueError("First packet does not match expected pattern.")
+                        else:
+                            # Create file object
+                            filename = match.group(1).decode('utf-8')
+                            if os.path.exists(filename):
+                                print(f"{filename} already exists.")
+                                sys.exit(1)
 
-    def release_violently(self):
-        """ Finishes printing for a broken transmission"""
-        self.stayalive = False
-        self.finish_time = time.time()
-        if self._print_thread is not None:
-            self._print_thread.join()
-        progress = 0
-        if self.filesize:
-            progress = int(self.data_moved / 1024 / self.filesize) * self.progress_bar_len
-        output = '\r%s\t|%sX%s| Connection broken!' % (
-            self.filename, '=' * progress, ' ' * (self.progress_bar_len - progress - 1),)
-        print(output)
+                            file_obj = open(filename, 'wb')
 
-    def print_decorator(self, some_function):
-        def wrapper(*args, **kwargs):
-            if self.allow_printing:
-                some_function(*args, **kwargs)
-        return wrapper
+                            # Collect additional file meta
+                            file_size = int(match.group(2))
+                            if match.group(3) is not None:
+                                file_obj.write(match.group(3))
+
+                    else:
+                        # Write to file object
+                        file_obj.write(message_in)
+
+    except (ValueError, socket.timeout, BrokenPipeError, KeyboardInterrupt):
+        pass
+    finally:
+        # Close file objects
+        if file_obj is not None:
+            file_obj.close()
+
+            # Remove file if incorrect file size - premature connection closure
+            if os.path.getsize(filename) != file_size:
+                os.remove(filename)
+                print(f"Failed to receive {filename}")
+            else:
+                print(f"File transfer complete & saved to: {filename}")
+        else:
+            print("Failed to receive file.")
 
 
-def cl_entry_point():
-    """ Entry function to allow CLI usage. """
+def _entry_point():
     from docopt import docopt
     args = docopt(__doc__)
-    main(args)
 
-
-def main(args):
-    """
-    Sends/receives based on args input; see docstrings for args dict items and usage.
-
-    Args:
-        args (dict): parse arguments.
-    """
-    if not isinstance(args, dict):
-        raise TypeError("args expected as dictionary")
-    if '--debug' not in args.keys():  # flag for muting script
-        args['--debug'] = True
-
-    # Parse inputs
-    ip, port = args['<ip:port>'].split(':')
-    if ip == '\'\'':  # docopt's response to '' input
-        ip = ''  # default interface
-    port = int(port)
-
-    file_limit = 0
-    data_rate_limit = 0
-    if args['--limit'] is not None:
-        try:
-            file_limit = int(args['--limit'])
-        except ValueError:
-            data_rate_limit, units = re.split('(\d+)', args['--limit'])[1:]
-            if units.upper() not in ['B', 'KB', 'MB', 'GB']:
-                raise ValueError("--limit was given an unsupported data amount unit\n%s" % __doc__)
-            data_rate_limit = int(data_rate_limit) * 1024 * ['B', 'KB', 'MB', 'GB'].index(units.upper())
-            file_limit = 0
-
-    # Receiving processes
-    if args['listen']:
-        server = Server(ip, port, debug=args['--debug'])
-
-        # Create output directory
-        save_directory = args['--save_path']
-        if save_directory[-1] != '/':
-            save_directory += '/'
-        if not os.path.exists(save_directory):
-            os.makedirs(save_directory)
-
-        # Wait for initial connection
-        if args['--debug']:
-            print("Listening on %s:%i" % (ip, port))
-        while not server.connect():
-            pass
-
-        # Receiving loop
-        while True:
-            if file_limit and server.files_recv_len == file_limit:
-                break
-            elif data_rate_limit and server.data_recv >= data_rate_limit:
-                break
-
-            try:
-                server.recv_file(save_directory)
-            except KeyboardInterrupt:
-                print('KeyboardInterrupt')
-                break
-            except socket.error:
-                while not server.connect():  # reconnect
-                    pass
-        server.close()
-
-    # Sending processes
-    elif args['send']:
-        client = Client(ip, port, debug=args['--debug'])
-
-        # Wait for initial connection
-        while not client.connect():
-            warn("Ensure end host is running and target ip:port are correct.")
-            time.sleep(0.5)
-            pass
-
-        # Sending loop for files
-        if args['files']:
-            file_paths = args['<file_path>']
-            file_path = file_paths[client.files_sent_len]
-            while True:
-                if not os.path.exists(file_path):
-                    print("Path to file is incorrect: ", file_path)
-                    file_paths.pop(client.files_sent_len)
-
-                if client.files_sent_len == len(file_paths):
-                    break
-                file_path = file_paths[client.files_sent_len]
-
-                try:
-                    client.send_file(file_path)
-                except KeyboardInterrupt:
-                    print('KeyboardInterrupt')
-                    break
-                except socket.error:  # Any error will trigger a reconnect, be aware for debugging
-                    while not client.connect():
-                        pass
-
-        # Sending loop for files directory
-        elif args['dir']:
-            dir_path = args['<dir_path>']
-            if dir_path[-1] != '/':
-                dir_path += '/'
-            stayalive = args['--stayalive']
-
-            if args['--recursive']:
-                client.allow_relative_filenames(dir_path)
-
-            file_history = []
-            while True:
-                filelist = []
-                for root, directories, filenames in os.walk(dir_path):
-                    filepaths = [os.path.join(root, filename) for filename in filenames]
-                    filelist.extend([filepath for filepath in filepaths if os.path.isfile(filepath)])
-                    if not args['--recursive']:
-                        break
-                new_files = [f for f in filelist if f not in file_history]
-                file_history.extend(new_files)
-
-                if new_files:
-                    while True:
-                        if file_limit and client.files_sent_len >= file_limit:
-                            break
-                        elif data_rate_limit and client.data_sent >= data_rate_limit:
-                            break
-
-                        elif not new_files:
-                            break
-                        file_path = new_files.pop(0)
-
-                        if not os.path.exists(file_path):
-                            print("Path to file is incorrect: ", file_path)
-                            continue
-
-                        try:
-                            client.send_file(file_path)
-                        except KeyboardInterrupt:
-                            print('KeyboardInterrupt')
-                            break
-                        except socket.error:
-                            while not client.connect():
-                                pass
-                if file_limit and client.files_sent_len >= file_limit:
-                    break
-                elif data_rate_limit and client.data_sent >= data_rate_limit:
-                    break
-                elif not stayalive:
-                    break
-        client.close()
+    if args['send']:
+        send(file_path=args['<file_path>'])
+    else:
+        ip, port = args['<host>'].split('-')
+        receive(ip, int(port))
 
 
 if __name__ == '__main__':
-    cl_entry_point()
+    _entry_point()
