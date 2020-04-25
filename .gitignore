@@ -1,9 +1,5 @@
 # Common package-specific ignores
 .idea/
-cli_data/
-folan_dest/
-*.jpg
-*.png
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

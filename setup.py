@@ -15,10 +15,6 @@ if sys.argv[-1] == "publish":
     os.system("twine upload dist/*")
     sys.exit()
 
-REQUIRED = [
-    'docopt==0.6.2'
-]
-
 setup(
     name='folan',
     version=__version__,
@@ -28,22 +24,21 @@ setup(
     license='MIT',
     url='https://github.com/MattTimms/folan',
     py_modules=['folan'],
-    install_requires=REQUIRED,
+    install_requires=[
+        'docopt',
+        'psutil',
+        'pytest'
+    ],
     classifiers=[  # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
-        'Development Status :: 3 - Alpha',
         'License :: OSI Approved :: MIT License',
-        'Programming Language :: Python :: 2.7',
-        'Programming Language :: Python :: 3.3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.8',
         'Topic :: Communications :: File Sharing',
         'Topic :: Software Development',
         'Topic :: Utilities',
     ],
     entry_points={
         'console_scripts': [
-            'folan = folan:cl_entry_point'
+            'folan = folan:_entry_point'
         ]
     },
     keywords=['file sharing', 'tcp', 'lan'],
